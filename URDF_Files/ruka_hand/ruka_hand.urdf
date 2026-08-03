@@ -1,0 +1,337 @@
+<robot name="hand_assembly">
+  <link name="world"/>
+  <link name="world_frame">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.0019949722"/>
+      <inertia ixx="1.994972e-03" ixy="0.000000e+00" ixz="0.000000e+00" iyy="1.994972e-03" iyz="0.000000e+00" izz="1.994972e-03"/>
+    </inertial>
+  </link>
+  <link name="Palm_Link">
+    <inertial>
+      <origin xyz="0.0044980786 0.0030506548 -0.017010718" rpy="-0.0049900126 -0.26403325 1.5394964"/>
+      <mass value="0.89752977"/>
+      <inertia ixx="1.994972e-03" ixy="-6.649047e-20" ixz="-5.026542e-19" iyy="1.994972e-03" iyz="3.768373e-19" izz="1.994972e-03"/>
+    </inertial>
+    <visual>
+      <origin xyz="0.0044980786 0.0030506548 -0.017010718" rpy="-0.0049900116 -0.26403325 1.5394964"/>
+      <geometry>
+        <mesh filename="meshes/Palm.stl"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="Index_MCP_Link">
+    <inertial>
+      <origin xyz="0.0288724 -1.28993e-08 0.00378475" rpy="0 -1.5678519 3.1415927"/>
+      <mass value="0.0065417532"/>
+      <inertia ixx="1.994972e-03" ixy="0.000000e+00" ixz="-4.417642e-19" iyy="1.994972e-03" iyz="0.000000e+00" izz="1.994972e-03"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.017010707 0.0049997573 0.00094885055" rpy="-0.025856405 -1.5662761 -3.1157306"/>
+      <geometry>
+        <mesh filename="meshes/Index_MCP.stl"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="Index_PIP_Link">
+    <inertial>
+      <origin xyz="0.000734414 -1.34435e-07 0.00333493" rpy="3.1415927 -1.5198579 0"/>
+      <mass value="0.0059954899"/>
+      <inertia ixx="1.994972e-03" ixy="0.000000e+00" ixz="-2.097920e-19" iyy="1.994972e-03" iyz="0.000000e+00" izz="1.994972e-03"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.012089813 0.0049996406 0.00056263186" rpy="-3.1381599 -1.528242 -0.0034200715"/>
+      <geometry>
+        <mesh filename="meshes/Index_DIP.stl"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="Index_DIP_Link">
+    <inertial>
+      <origin xyz="-0.0274083 1.00211e-07 0.00320314" rpy="-1.0726051e-05 -1.5149729 -3.1415927"/>
+      <mass value="0.0071215918"/>
+      <inertia ixx="1.994972e-03" ixy="-5.263369e-24" ixz="6.166064e-19" iyy="1.994972e-03" iyz="-3.563358e-24" izz="1.994972e-03"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.01421751 0.00040002873 -0.0013973391" rpy="-6.5290896e-06 -1.5384487 3.1415927"/>
+      <geometry>
+        <mesh filename="meshes/Index_PIP.stl"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="Middle_MCP_Link">
+    <inertial>
+      <origin xyz="0.0288724 -9.49408e-09 0.00378477" rpy="0 -1.5678519 3.1415927"/>
+      <mass value="0.0065417332"/>
+      <inertia ixx="1.994972e-03" ixy="0.000000e+00" ixz="-4.417642e-19" iyy="1.994972e-03" iyz="0.000000e+00" izz="1.994972e-03"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.017010707 -2.4269882e-07 0.00094885048" rpy="-0.025856817 -1.5662761 -3.1157302"/>
+      <geometry>
+        <mesh filename="meshes/Middle_MCP.stl"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="Middle_PIP_Link">
+    <inertial>
+      <origin xyz="0.000734412 -1.31357e-07 0.00333494" rpy="3.1415927 -1.5198579 0"/>
+      <mass value="0.0059954899"/>
+      <inertia ixx="1.994972e-03" ixy="0.000000e+00" ixz="-2.097920e-19" iyy="1.994972e-03" iyz="0.000000e+00" izz="1.994972e-03"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.012089813 -3.5937426e-07 0.00056263187" rpy="-3.1381599 -1.528242 -0.0034200315"/>
+      <geometry>
+        <mesh filename="meshes/Middle_DIP.stl"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="Middle_DIP_Link">
+    <inertial>
+      <origin xyz="-0.0274083 9.97469e-08 0.00320314" rpy="-9.7591396e-06 -1.5149729 -3.1415927"/>
+      <mass value="0.0071215918"/>
+      <inertia ixx="1.994972e-03" ixy="-6.035991e-24" ixz="6.059550e-19" iyy="1.994972e-03" iyz="-4.459908e-24" izz="1.994972e-03"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.01321751 2.8730478e-08 -0.00089733903" rpy="-6.5291577e-06 -1.5384487 -3.1415927"/>
+      <geometry>
+        <mesh filename="meshes/Middle_PIP.stl"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="Ring_MCP_Link">
+    <inertial>
+      <origin xyz="0.0288724 -7.11557e-09 0.00378476" rpy="0 -1.5678519 3.1415927"/>
+      <mass value="0.0065417532"/>
+      <inertia ixx="1.994972e-03" ixy="0.000000e+00" ixz="-4.417642e-19" iyy="1.994972e-03" iyz="0.000000e+00" izz="1.994972e-03"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.017010707 -2.4269845e-07 -5.1149453e-05" rpy="-0.025856405 -1.5662761 -3.1157306"/>
+      <geometry>
+        <mesh filename="meshes/Ring_MCP.stl"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="Ring_PIP_Link">
+    <inertial>
+      <origin xyz="0.000734409 -1.29347e-07 0.00333494" rpy="3.1415927 -1.5198579 0"/>
+      <mass value="0.0059954699"/>
+      <inertia ixx="1.994972e-03" ixy="0.000000e+00" ixz="-2.097920e-19" iyy="1.994972e-03" iyz="0.000000e+00" izz="1.994972e-03"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.010089813 -3.5936923e-07 -0.00043736814" rpy="-3.1381599 -1.528242 -0.0034200715"/>
+      <geometry>
+        <mesh filename="meshes/Ring_DIP.stl"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="Ring_DIP_Link">
+    <inertial>
+      <origin xyz="-0.0274083 1.00945e-07 0.00320315" rpy="-9.3611761e-06 -1.5149743 -3.1415927"/>
+      <mass value="0.0071215719"/>
+      <inertia ixx="1.994972e-03" ixy="1.294407e-24" ixz="-6.179308e-19" iyy="1.994972e-03" iyz="6.666894e-25" izz="1.994972e-03"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.01221751 2.8733929e-08 -0.0013973391" rpy="-6.5290896e-06 -1.5384487 3.1415927"/>
+      <geometry>
+        <mesh filename="meshes/Ring_PIP.stl"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="Pinky_MCP_Link">
+    <inertial>
+      <origin xyz="0.0268917 -2.1328e-08 0.00337657" rpy="3.1415843 -1.5626391 3.3496638e-10"/>
+      <mass value="0.0061500803"/>
+      <inertia ixx="1.994972e-03" ixy="-6.697728e-24" ixz="4.198403e-19" iyy="1.994972e-03" iyz="-1.746484e-24" izz="1.994972e-03"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.014923683 -2.7768044e-07 -0.00038343923" rpy="-0.17765076 -1.5699965 -2.9639383"/>
+      <geometry>
+        <mesh filename="meshes/Pinky_MCP.stl"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="Pinky_PIP_Link">
+    <inertial>
+      <origin xyz="0.000757212 -1.38277e-07 0.00329943" rpy="3.1415927 -1.5105417 0"/>
+      <mass value="0.0052057801"/>
+      <inertia ixx="1.994972e-03" ixy="0.000000e+00" ixz="-8.916512e-19" iyy="1.994972e-03" iyz="0.000000e+00" izz="1.994972e-03"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.010133962 -1.9624959e-07 -0.00017175322" rpy="-3.1402767 -1.5196872 -0.0013032404"/>
+      <geometry>
+        <mesh filename="meshes/Pinky_DIP.stl"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="Pinky_DIP_Link">
+    <inertial>
+      <origin xyz="-0.0236575 -8.70958e-08 0.00338829" rpy="-1.4411752e-05 -1.5192369 3.1415927"/>
+      <mass value="0.0061220709"/>
+      <inertia ixx="1.994972e-03" ixy="-1.161267e-24" ixz="2.055708e-19" iyy="1.994972e-03" iyz="-2.861918e-24" izz="1.994972e-03"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.010574984 2.3663941e-07 -0.0016090746" rpy="-0.00099989006 -1.5175749 -3.1406522"/>
+      <geometry>
+        <mesh filename="meshes/Pinky_PIP.stl"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="Thumb_MCP_Link">
+    <inertial>
+      <origin xyz="0.0162526 -0.00468252 0.00333969" rpy="3.1003775 -1.4173801 0.022663807"/>
+      <mass value="0.010507818"/>
+      <inertia ixx="1.994972e-03" ixy="4.280014e-22" ixz="-3.874876e-20" iyy="1.994972e-03" iyz="-1.095995e-21" izz="1.994972e-03"/>
+    </inertial>
+    <visual>
+      <origin xyz="0.015166612 -0.0046612658 -0.0030403717" rpy="3.1360295 -1.3928974 0.04430827"/>
+      <geometry>
+        <mesh filename="meshes/Thumb_MCP.stl"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="Thumb_DIP_Link">
+    <inertial>
+      <origin xyz="-0.000359156 5.0434e-05 0.00349653" rpy="2.4414404 -1.5564331 0.70653424"/>
+      <mass value="0.0065838072"/>
+      <inertia ixx="1.994972e-03" ixy="3.930417e-21" ixz="5.426342e-19" iyy="1.994972e-03" iyz="6.854821e-21" izz="1.994972e-03"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.014087519 0.0026538262 0.00067346201" rpy="1.5867083 -0.74850712 1.5516028"/>
+      <geometry>
+        <mesh filename="meshes/Thumb_DIP.stl"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="Thumb_PIP_Link">
+    <inertial>
+      <origin xyz="-0.0282104 -4.96887e-08 0.00319437" rpy="2.6805167e-05 -1.510171 -3.1415927"/>
+      <mass value="0.0069292566"/>
+      <inertia ixx="1.994972e-03" ixy="-1.379075e-23" ixz="-8.948823e-19" iyy="1.994972e-03" iyz="-1.734883e-23" izz="1.994972e-03"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.012666683 2.9212249e-08 -0.0013703634" rpy="-0.0026776913 -1.5341886 -3.138902"/>
+      <geometry>
+        <mesh filename="meshes/Thumb_PIP.stl"/>
+      </geometry>
+    </visual>
+  </link>
+  <joint name="fixed_world_to_world_frame" type="fixed">
+    <parent link="world"/>
+    <child link="world_frame"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+  <joint name="Palm_Joint" type="fixed">
+    <parent link="world_frame"/>
+    <child link="Palm_Link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+  <joint name="Index_MCP_Joint" type="revolute">
+    <parent link="Palm_Link"/>
+    <child link="Index_MCP_Link"/>
+    <origin xyz="0.0322 0.0146007 -0.08022" rpy="2.5325946 -1.3600992 2.1257049"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="2.44222" effort="100" velocity="100"/>
+  </joint>
+  <joint name="Index_PIP_Joint" type="revolute">
+    <parent link="Index_MCP_Link"/>
+    <child link="Index_PIP_Link"/>
+    <origin xyz="-0.035057 0 0.002" rpy="0 0.17453 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="2.09" effort="100" velocity="100"/>
+  </joint>
+  <joint name="Index_DIP_Joint" type="revolute">
+    <parent link="Index_PIP_Link"/>
+    <child link="Index_DIP_Link"/>
+    <origin xyz="-0.027 0.0045 0.001" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <mimic joint="Index_PIP_Joint" multiplier="1" offset="0"/>
+    <limit lower="0" upper="2.09" effort="100" velocity="100"/>
+  </joint>
+  <joint name="Middle_MCP_Joint" type="revolute">
+    <parent link="Palm_Link"/>
+    <child link="Middle_MCP_Link"/>
+    <origin xyz="0.01518 0.0135414 -0.081" rpy="-1.5707963 -1.5707963 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="2.44222" effort="100" velocity="100"/>
+  </joint>
+  <joint name="Middle_PIP_Joint" type="revolute">
+    <parent link="Middle_MCP_Link"/>
+    <child link="Middle_PIP_Link"/>
+    <origin xyz="-0.034 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="2.09" effort="100" velocity="100"/>
+  </joint>
+  <joint name="Middle_DIP_Joint" type="revolute">
+    <parent link="Middle_PIP_Link"/>
+    <child link="Middle_DIP_Link"/>
+    <origin xyz="-0.026 0 0.002" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <mimic joint="Middle_PIP_Joint" multiplier="1" offset="0"/>
+    <limit lower="0" upper="2.09" effort="100" velocity="100"/>
+  </joint>
+  <joint name="Ring_MCP_Joint" type="revolute">
+    <parent link="Palm_Link"/>
+    <child link="Ring_MCP_Link"/>
+    <origin xyz="-0.0088 0.01453 -0.08009" rpy="-1.2805955 -1.4598013 -0.34861406"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="2.44222" effort="100" velocity="100"/>
+  </joint>
+  <joint name="Ring_PIP_Joint" type="revolute">
+    <parent link="Ring_MCP_Link"/>
+    <child link="Ring_PIP_Link"/>
+    <origin xyz="-0.036 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="2.09" effort="100" velocity="100"/>
+  </joint>
+  <joint name="Ring_DIP_Joint" type="revolute">
+    <parent link="Ring_PIP_Link"/>
+    <child link="Ring_DIP_Link"/>
+    <origin xyz="-0.025746 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <mimic joint="Ring_PIP_Joint" multiplier="1" offset="0"/>
+    <limit lower="0" upper="2.09" effort="100" velocity="100"/>
+  </joint>
+  <joint name="Pinky_MCP_Joint" type="revolute">
+    <parent link="Palm_Link"/>
+    <child link="Pinky_MCP_Link"/>
+    <origin xyz="-0.030617 0.020313 -0.07398" rpy="-1.140397 -1.3618001 -0.55660297"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="2.44222" effort="100" velocity="100"/>
+  </joint>
+  <joint name="Pinky_PIP_Joint" type="revolute">
+    <parent link="Pinky_MCP_Link"/>
+    <child link="Pinky_PIP_Link"/>
+    <origin xyz="-0.032 0 0" rpy="0 0.027735085 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="2.09" effort="100" velocity="100"/>
+  </joint>
+  <joint name="Pinky_DIP_Joint" type="revolute">
+    <parent link="Pinky_PIP_Link"/>
+    <child link="Pinky_DIP_Link"/>
+    <origin xyz="-0.023 0 0.001" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <mimic joint="Pinky_PIP_Joint" multiplier="1" offset="0"/>
+    <limit lower="0" upper="2.09" effort="100" velocity="100"/>
+  </joint>
+  <joint name="Thumb_CMC_Joint" type="revolute">
+    <parent link="Palm_Link"/>
+    <child link="Thumb_MCP_Link"/>
+    <origin xyz="0.037688 0.022225 -0.025118" rpy="-1.5707992 -9.6355625e-08 0.031854956"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.314" upper="0" effort="100" velocity="100"/>
+  </joint>
+  <joint name="Thumb_MCP_Joint" type="revolute">
+    <parent link="Thumb_MCP_Link"/>
+    <child link="Thumb_DIP_Link"/>
+    <origin xyz="0.033935 -0.0044094 -0.0065999" rpy="1.5707907 -7.5054754e-12 -3.1415853"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="1.57" effort="100" velocity="100"/>
+  </joint>
+  <joint name="Thumb_IP_Joint" type="revolute">
+    <parent link="Thumb_DIP_Link"/>
+    <child link="Thumb_PIP_Link"/>
+    <origin xyz="-0.027794 0.0035 7e-06" rpy="-0.78539962 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="2.09" effort="100" velocity="100"/>
+  </joint>
+</robot>

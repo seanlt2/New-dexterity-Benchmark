@@ -1,0 +1,569 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="URDF_v4_Right">
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="0.00656720169302084 0.014479377474207 0.00017721012836088"
+        rpy="0 0 0" />
+      <mass
+        value="0.241418881118491" />
+      <inertia
+        ixx="8.29179012284045E-05"
+        ixy="-5.57843135835109E-06"
+        ixz="1.75115263652209E-07"
+        iyy="0.000145285415943206"
+        iyz="-4.25231448389357E-07"
+        izz="0.00010114061356772" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://URDF_v4_Right/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://URDF_v4_Right/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="CMC">
+    <inertial>
+      <origin
+        xyz="0.0193678734622304 -0.00898899318604927 0.0104809276453103"
+        rpy="0 0 0" />
+      <mass
+        value="0.0264128081450763" />
+      <inertia
+        ixx="1.83714301413544E-06"
+        ixy="6.56655420051632E-07"
+        ixz="1.66576044172142E-08"
+        iyy="4.07199364840859E-06"
+        iyz="4.8706980224364E-08"
+        izz="4.45745212992967E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://URDF_v4_Right/meshes/CMC.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://URDF_v4_Right/meshes/CMC.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint1"
+    type="revolute">
+    <origin
+      xyz="0.0049117 0 0.0085073"
+      rpy="1.5708 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="CMC" />
+    <axis
+      xyz="0.86603 -0.5 0" />
+    <limit
+      lower="-1.25"
+      upper="0.70"
+      effort="1"
+      velocity="1" />
+  </joint>
+  <link
+    name="Link1_Thumb">
+    <inertial>
+      <origin
+        xyz="-0.0203422741080077 0.00733798468042576 -1.64553600606743E-09"
+        rpy="0 0 0" />
+      <mass
+        value="0.00560650073800743" />
+      <inertia
+        ixx="1.09064967247218E-07"
+        ixy="4.3022683138531E-09"
+        ixz="3.41177789429198E-14"
+        iyy="1.74465945719792E-06"
+        iyz="-1.73448350699336E-14"
+        izz="1.74158758948159E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://URDF_v4_Right/meshes/Link1_Thumb.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://URDF_v4_Right/meshes/Link1_Thumb.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint6"
+    type="revolute">
+    <origin
+      xyz="0.013607 0 0.015"
+      rpy="0 0.24469 3.1416" />
+    <parent
+      link="CMC" />
+    <child
+      link="Link1_Thumb" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="0"
+      upper="2"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Fingertip_Thumb">
+    <inertial>
+      <origin
+        xyz="-0.0204333253029588 -0.0100056019932063 0.00247725859759255"
+        rpy="0 0 0" />
+      <mass
+        value="0.0125196567770339" />
+      <inertia
+        ixx="9.72175142926983E-07"
+        ixy="2.98477594308915E-09"
+        ixz="1.50029529851244E-07"
+        iyy="2.35371742836929E-06"
+        iyz="-6.70708985640319E-10"
+        izz="2.47085555385713E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://URDF_v4_Right/meshes/Fingertip_Thumb.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://URDF_v4_Right/meshes/Fingertip_Thumb.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint7"
+    type="revolute">
+    <origin
+      xyz="-0.05 -0.0019185 0"
+      rpy="3.1416 0.093216 0" />
+    <parent
+      link="Link1_Thumb" />
+    <child
+      link="Fingertip_Thumb" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="0"
+      upper="2"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Abd_Add_Index">
+    <inertial>
+      <origin
+        xyz="-0.0213545806625778 0.000261543766344633 -0.00689109537300997"
+        rpy="0 0 0" />
+      <mass
+        value="0.0230626142210204" />
+      <inertia
+        ixx="2.50642854632867E-06"
+        ixy="-1.06469591252552E-07"
+        ixz="-5.27617781350041E-08"
+        iyy="3.29575299089444E-06"
+        iyz="-1.26757974546424E-07"
+        izz="2.13775454170167E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://URDF_v4_Right/meshes/Abd_Add_Index.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://URDF_v4_Right/meshes/Abd_Add_Index.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint2"
+    type="revolute">
+    <origin
+      xyz="-0.04 0 0.0225"
+      rpy="1.5707963267949 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="Abd_Add_Index" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.57"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Link1_Index">
+    <inertial>
+      <origin
+        xyz="-0.0202724368908947 -0.000712304404879467 -3.85780431145729E-09"
+        rpy="0 0 0" />
+      <mass
+        value="0.00571177198623797" />
+      <inertia
+        ixx="1.1632364015844E-07"
+        ixy="8.54445293233152E-09"
+        ixz="-5.11234296385733E-13"
+        iyy="1.7363456461322E-06"
+        iyz="-1.08480465815374E-13"
+        izz="1.73868615513806E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://URDF_v4_Right/meshes/Link1_Index.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://URDF_v4_Right/meshes/Link1_Index.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint5"
+    type="revolute">
+    <origin
+      xyz="-0.026 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="Abd_Add_Index" />
+    <child
+      link="Link1_Index" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="0"
+      upper="2"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Fingertip_Index">
+    <inertial>
+      <origin
+        xyz="-0.0204333577805241 -5.60249874107313E-06 0.00247727103269342"
+        rpy="0 0 0" />
+      <mass
+        value="0.012519683467004" />
+      <inertia
+        ixx="9.72179562505661E-07"
+        ixy="2.98477501679517E-09"
+        ixz="1.50030056444559E-07"
+        iyy="2.35372263228688E-06"
+        iyz="-6.70250954897714E-10"
+        izz="2.47085678313063E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://URDF_v4_Right/meshes/Fingertip_Index.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://URDF_v4_Right/meshes/Fingertip_Index.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint8"
+    type="revolute">
+    <origin
+      xyz="-0.05 0 0"
+      rpy="3.1416 0.093216 0" />
+    <parent
+      link="Link1_Index" />
+    <child
+      link="Fingertip_Index" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="0"
+      upper="2"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Abd_Add_Pinkie">
+    <inertial>
+      <origin
+        xyz="-0.0213545806625778 0.000261543766344626 -0.00689109537300998"
+        rpy="0 0 0" />
+      <mass
+        value="0.0230626142210204" />
+      <inertia
+        ixx="2.50642854632867E-06"
+        ixy="-1.06469591252552E-07"
+        ixz="-5.27617781350039E-08"
+        iyy="3.29575299089444E-06"
+        iyz="-1.26757974546424E-07"
+        izz="2.13775454170168E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://URDF_v4_Right/meshes/Abd_Add_Pinkie.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://URDF_v4_Right/meshes/Abd_Add_Pinkie.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint3"
+    type="revolute">
+    <origin
+      xyz="-0.04 0 -0.0225"
+      rpy="1.5707963267949 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="Abd_Add_Pinkie" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="1.57"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Link1_Pinkie">
+    <inertial>
+      <origin
+        xyz="-0.0202724368908947 -0.000712304404879488 -3.85780430984588E-09"
+        rpy="0 0 0" />
+      <mass
+        value="0.00571177198623797" />
+      <inertia
+        ixx="1.16323640158451E-07"
+        ixy="8.54445293233181E-09"
+        ixz="-5.1123429617025E-13"
+        iyy="1.73634564613222E-06"
+        iyz="-1.08480465880813E-13"
+        izz="1.73868615513806E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://URDF_v4_Right/meshes/Link1_Pinkie.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://URDF_v4_Right/meshes/Link1_Pinkie.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint4"
+    type="revolute">
+    <origin
+      xyz="-0.026 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="Abd_Add_Pinkie" />
+    <child
+      link="Link1_Pinkie" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="0"
+      upper="2"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Fingertip_Pinkie">
+    <inertial>
+      <origin
+        xyz="-0.0204333574959239 -5.60226405327269E-06 0.00247727091625364"
+        rpy="0 0 0" />
+      <mass
+        value="0.0125196831565173" />
+      <inertia
+        ixx="9.72179507020448E-07"
+        ixy="2.98476810615469E-09"
+        ixz="1.50030062910066E-07"
+        iyy="2.35372260755179E-06"
+        iyz="-6.70278964100714E-10"
+        izz="2.47085675635161E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://URDF_v4_Right/meshes/Fingertip_Pinkie.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://URDF_v4_Right/meshes/Fingertip_Pinkie.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Joint9"
+    type="revolute">
+    <origin
+      xyz="-0.05 0 0"
+      rpy="3.1416 0.093216 0" />
+    <parent
+      link="Link1_Pinkie" />
+    <child
+      link="Fingertip_Pinkie" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="0"
+      upper="2"
+      effort="0"
+      velocity="0" />
+  </joint>
+</robot>

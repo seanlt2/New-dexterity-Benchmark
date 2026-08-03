@@ -1,0 +1,591 @@
+<?xml version="1.0"?>
+<robot name="krysalis_hand">
+
+  <material name="hand_gray">
+    <color rgba="0.698039 0.698039 0.698039 1"/>
+  </material>
+
+  <link name="AUBO_Base">
+    <inertial>
+      <origin xyz="0.0027871034 0.00026983086 0.013755486" rpy="0 0 0"/>
+      <mass value="0.053797026"/>
+      <inertia ixx="2.7053731e-05" ixy="-2.077203e-07" ixz="-4.1758132e-07" iyy="3.2637245e-05" iyz="-1.7889451e-07" izz="4.8649193e-05"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/AUBO_Base.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/AUBO_Base.STL"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="Below_Palm">
+    <inertial>
+      <origin xyz="-0.0016322094 0.017010888 0.00092234246" rpy="0 0 0"/>
+      <mass value="0.058498712"/>
+      <inertia ixx="4.5458704e-05" ixy="-3.4717182e-07" ixz="2.9182554e-07" iyy="4.7082039e-05" iyz="-1.7312739e-06" izz="3.5240344e-05"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/Below_Palm.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/Below_Palm.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Wrist_2" type="revolute">
+    <parent link="AUBO_Base"/>
+    <child link="Below_Palm"/>
+    <origin xyz="0 0 0.049" rpy="1.5708003 -8.0000451e-12 1.5708003"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.1294" upper="1.2489" effort="5" velocity="3.0"/>
+  </joint>
+
+  <link name="Knuckle_Holder">
+    <inertial>
+      <origin xyz="0.0012447264 0.037006458 -0.00062149814" rpy="0 0 0"/>
+      <mass value="0.11669909"/>
+      <inertia ixx="0.00012634436" ixy="7.8245453e-06" ixz="-2.9362451e-06" iyy="0.0001510035" iyz="2.7387811e-06" izz="0.00023666903"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/Knuckle_Holder.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/Knuckle_Holder.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Wrist_1" type="revolute">
+    <parent link="Below_Palm"/>
+    <child link="Knuckle_Holder"/>
+    <origin xyz="0 0.048 0.0027545" rpy="3.1415927 1.5707921 3.1415927"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-0.41544" upper="0.41544" effort="5" velocity="3.0"/>
+  </joint>
+
+  <link name="T_CMC">
+    <inertial>
+      <origin xyz="-0.018863271 0.017216591 -0.021425995" rpy="0 0 0"/>
+      <mass value="0.0054545367"/>
+      <inertia ixx="1.3344133e-06" ixy="2.826504e-08" ixz="-3.0179161e-08" iyy="6.4366026e-07" iyz="-1.9600645e-07" izz="1.4519999e-06"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/T_CMC.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/T_CMC.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Thumb_CMC" type="revolute">
+    <parent link="Knuckle_Holder"/>
+    <child link="T_CMC"/>
+    <origin xyz="-0.03389 -0.0067732 0.011594" rpy="2.1813996 -0.59941022 -0.73519994"/>
+    <axis xyz="0.642791 0 0.766041"/>
+    <limit lower="-1.5708" upper="0" effort="5" velocity="3.0"/>
+  </joint>
+
+  <link name="T_MCP">
+    <inertial>
+      <origin xyz="-0.019171967 0.022202815 -0.010585733" rpy="0 0 0"/>
+      <mass value="0.0034168355"/>
+      <inertia ixx="5.4334192e-07" ixy="1.1653752e-10" ixz="-3.9528587e-11" iyy="4.2056222e-07" iyz="1.4656835e-08" izz="6.4071055e-07"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/T_MCP.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/T_MCP.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Thumb_MCP" type="revolute">
+    <parent link="T_CMC"/>
+    <child link="T_MCP"/>
+    <origin xyz="0 0.051 -0.011349" rpy="0.024221984 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-0.92013758" upper="0.0" effort="5" velocity="3.0"/>
+  </joint>
+
+  <link name="T_IP">
+    <inertial>
+      <origin xyz="-0.019154858 0.020835899 -0.011159057" rpy="0 0 0"/>
+      <mass value="0.0036590732"/>
+      <inertia ixx="4.1914994e-07" ixy="2.3833228e-10" ixz="-5.8861673e-10" iyy="2.5905723e-07" iyz="7.5246381e-08" izz="4.2684508e-07"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/T_IP.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/T_IP.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Thumb_IP" type="revolute">
+    <parent link="T_MCP"/>
+    <child link="T_IP"/>
+    <origin xyz="0 0.0465 0" rpy="0.0052649036 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-0.78574723" upper="0.0" effort="5" velocity="3.0"/>
+  </joint>
+
+  <link name="I_Below_MCP">
+    <inertial>
+      <origin xyz="-1.1570443e-06 0.0052423085 0.0043938218" rpy="0 0 0"/>
+      <mass value="0.0038571577"/>
+      <inertia ixx="5.2732003e-07" ixy="1.3863762e-11" ixz="-5.8584107e-11" iyy="5.0195422e-07" iyz="-1.5638503e-07" izz="5.1613242e-07"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/I_Below_MCP.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/I_Below_MCP.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Index_Below_MCP" type="revolute">
+    <parent link="Knuckle_Holder"/>
+    <child link="I_Below_MCP"/>
+    <origin xyz="-0.042 0.087 0" rpy="-3.1415853 2.220446e-16 3.1415853"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-0.52018" upper="0" effort="5" velocity="3.0"/>
+  </joint>
+
+  <link name="I_MCP">
+    <inertial>
+      <origin xyz="1.9937429e-07 0.021455654 -0.012619259" rpy="0 0 0"/>
+      <mass value="0.0042656164"/>
+      <inertia ixx="8.9321701e-07" ixy="-1.4414254e-10" ixz="8.153397e-11" iyy="5.1935984e-07" iyz="-2.3486682e-08" izz="1.0217393e-06"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/I_MCP.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/I_MCP.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Index_MCP" type="revolute">
+    <parent link="I_Below_MCP"/>
+    <child link="I_MCP"/>
+    <origin xyz="0 0.028 0.0105" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1.79995806" upper="0.0" effort="10" velocity="3.0"/>
+  </joint>
+
+  <link name="I_PIP">
+    <inertial>
+      <origin xyz="0.01049171 0.022523302 1.520538e-06" rpy="0 0 0"/>
+      <mass value="0.0037076544"/>
+      <inertia ixx="7.3601161e-07" ixy="-4.2393501e-09" ixz="-1.7924755e-11" iyy="4.5792894e-07" iyz="1.1848777e-10" izz="6.1595681e-07"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/I_PIP.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/I_PIP.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Index_PIP" type="revolute">
+    <parent link="I_MCP"/>
+    <child link="I_PIP"/>
+    <origin xyz="0 0.051 -0.00225" rpy="1.5707963 1.5514 1.5707963"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.3102187" upper="0.0" effort="5" velocity="3.0"/>
+  </joint>
+
+  <link name="I_DIP">
+    <inertial>
+      <origin xyz="0.010222127 0.019971141 -6.2860969e-07" rpy="0 0 0"/>
+      <mass value="0.004244805"/>
+      <inertia ixx="4.9683684e-07" ixy="-9.5485145e-08" ixz="-3.3402035e-11" iyy="4.2177544e-07" iyz="-2.656547e-11" izz="4.2768699e-07"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/I_DIP.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/I_DIP.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Index_DIP" type="revolute">
+    <parent link="I_PIP"/>
+    <child link="I_DIP"/>
+    <origin xyz="0 0.048 0" rpy="0 0 -0.019349006"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.1883947" upper="0.0" effort="5" velocity="3.0"/>
+  </joint>
+
+  <link name="M_MCP">
+    <inertial>
+      <origin xyz="0.012999723 0.019478403 -0.012271468" rpy="0 0 0"/>
+      <mass value="0.0035538153"/>
+      <inertia ixx="6.3187534e-07" ixy="-4.4274599e-11" ixz="5.5951024e-12" iyy="4.3067057e-07" iyz="-2.1184224e-08" izz="7.4427658e-07"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/M_MCP.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/M_MCP.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Middle_MCP" type="revolute">
+    <parent link="Knuckle_Holder"/>
+    <child link="M_MCP"/>
+    <origin xyz="-0.001 0.121 -0.01094" rpy="-3.1415853 2.220446e-16 3.1415853"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1.77883957" upper="0.0" effort="5" velocity="3.0"/>
+  </joint>
+
+  <link name="M_PIP">
+    <inertial>
+      <origin xyz="0.012999182 0.025260985 -0.010847688" rpy="0 0 0"/>
+      <mass value="0.0042494465"/>
+      <inertia ixx="8.0622944e-07" ixy="3.2356912e-10" ixz="-6.6062355e-11" iyy="5.2571372e-07" iyz="3.2135147e-08" izz="9.1207878e-07"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/M_PIP.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/M_PIP.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Middle_PIP" type="revolute">
+    <parent link="M_MCP"/>
+    <child link="M_PIP"/>
+    <origin xyz="0 0.045 -0.00225" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1.2821189" upper="0.0" effort="5" velocity="3.0"/>
+  </joint>
+
+  <link name="M_DIP">
+    <inertial>
+      <origin xyz="0.013000318 0.024962114 -0.010700669" rpy="0 0 0"/>
+      <mass value="0.0057646574"/>
+      <inertia ixx="8.6968061e-07" ixy="-2.8430331e-11" ixz="5.5570787e-11" iyy="6.2057067e-07" iyz="1.3246583e-07" izz="9.7486602e-07"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/M_DIP.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/M_DIP.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Middle_DIP" type="revolute">
+    <parent link="M_PIP"/>
+    <child link="M_DIP"/>
+    <origin xyz="0 0.0515 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1.2747885" upper="0.0" effort="5" velocity="3.0"/>
+  </joint>
+
+  <link name="R_Below_MCP">
+    <inertial>
+      <origin xyz="1.4959621e-05 0.0052431554 -0.0043937789" rpy="0 0 0"/>
+      <mass value="0.0038572547"/>
+      <inertia ixx="5.2728134e-07" ixy="3.7455081e-10" ixz="-2.8400675e-10" iyy="5.019821e-07" iyz="1.5637349e-07" izz="5.1611394e-07"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/R_Below_MCP.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/R_Below_MCP.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Ring_Below_MCP" type="revolute">
+    <parent link="Knuckle_Holder"/>
+    <child link="R_Below_MCP"/>
+    <origin xyz="0.014 0.087 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-0.52018" upper="0" effort="5" velocity="3.0"/>
+    <mimic joint="Index_Below_MCP" multiplier="1.0" offset="0.0"/>
+  </joint>
+
+  <link name="R_MCP">
+    <inertial>
+      <origin xyz="-1.2264583e-08 0.018966492 -0.01210124" rpy="0 0 0"/>
+      <mass value="0.0032662244"/>
+      <inertia ixx="5.8737039e-07" ixy="4.7192689e-11" ixz="-5.2833524e-11" iyy="3.8543447e-07" iyz="-2.0223459e-08" izz="6.5660002e-07"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/R_MCP.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/R_MCP.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Ring_MCP" type="revolute">
+    <parent link="R_Below_MCP"/>
+    <child link="R_MCP"/>
+    <origin xyz="0 0.028 -0.0105" rpy="-3.1415853 0 -3.1415853"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1.7551031" upper="0.0" effort="5" velocity="3.0"/>
+  </joint>
+
+  <link name="R_PIP">
+    <inertial>
+      <origin xyz="4.2319659e-06 0.023306502 -0.009863357" rpy="0 0 0"/>
+      <mass value="0.0038393546"/>
+      <inertia ixx="7.1334313e-07" ixy="1.2484729e-10" ixz="-1.9758167e-11" iyy="4.5806813e-07" iyz="1.2162892e-08" izz="8.021116e-07"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/R_PIP.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/R_PIP.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Ring_PIP" type="revolute">
+    <parent link="R_MCP"/>
+    <child link="R_PIP"/>
+    <origin xyz="0 0.045 -0.00225" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1.2728686" upper="0.0" effort="5" velocity="3.0"/>
+  </joint>
+
+  <link name="R_DIP">
+    <inertial>
+      <origin xyz="1.8313925e-06 0.024417879 -0.010474798" rpy="0 0 0"/>
+      <mass value="0.0051047494"/>
+      <inertia ixx="6.7333364e-07" ixy="6.0424588e-11" ixz="-6.9088642e-11" iyy="5.269891e-07" iyz="1.2623293e-07" izz="7.4456324e-07"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/R_DIP.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/R_DIP.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Ring_DIP" type="revolute">
+    <parent link="R_PIP"/>
+    <child link="R_DIP"/>
+    <origin xyz="0 0.0515 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1.2840387" upper="0.0" effort="5" velocity="3.0"/>
+  </joint>
+
+  <link name="P_Below_MCP">
+    <inertial>
+      <origin xyz="9.3374772e-06 0.0052566609 -0.0044007405" rpy="0 0 0"/>
+      <mass value="0.0038511565"/>
+      <inertia ixx="5.2664195e-07" ixy="2.5046146e-10" ixz="-1.888987e-10" iyy="5.0117992e-07" iyz="1.561443e-07" izz="5.149334e-07"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/P_Below_MCP.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/P_Below_MCP.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Pinky_Below_MCP" type="revolute">
+    <parent link="Knuckle_Holder"/>
+    <child link="P_Below_MCP"/>
+    <origin xyz="0.042 0.087 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-0.74186" upper="0" effort="5" velocity="3.0"/>
+    <mimic joint="Index_Below_MCP" multiplier="1.4230769231" offset="0.0"/>
+  </joint>
+
+  <link name="P_MCP">
+    <inertial>
+      <origin xyz="-6.8499554e-07 0.020738813 -0.011892171" rpy="0 0 0"/>
+      <mass value="0.0032108481"/>
+      <inertia ixx="6.0081612e-07" ixy="4.7954865e-11" ixz="2.4698534e-11" iyy="3.7504829e-07" iyz="7.8198368e-09" izz="6.7017937e-07"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/P_MCP.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/P_MCP.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Pinky_MCP" type="revolute">
+    <parent link="P_Below_MCP"/>
+    <child link="P_MCP"/>
+    <origin xyz="0 0.028 -0.0105" rpy="-3.1415853 0 -3.1415853"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1.7266542" upper="0.0" effort="5" velocity="3.0"/>
+  </joint>
+
+  <link name="P_PIP">
+    <inertial>
+      <origin xyz="2.9999702e-06 0.022427019 -0.0099598546" rpy="0 0 0"/>
+      <mass value="0.0033736016"/>
+      <inertia ixx="5.5741361e-07" ixy="8.1749543e-11" ixz="1.5161483e-11" iyy="4.0752688e-07" iyz="1.1619801e-08" izz="6.4573322e-07"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/P_PIP.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/P_PIP.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Pinky_PIP" type="revolute">
+    <parent link="P_MCP"/>
+    <child link="P_PIP"/>
+    <origin xyz="0 0.0455 -0.00225" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1.2571607" upper="0.0" effort="5" velocity="3.0"/>
+  </joint>
+
+  <link name="P_DIP">
+    <inertial>
+      <origin xyz="1.6946459e-06 0.02384109 -0.010427847" rpy="0 0 0"/>
+      <mass value="0.0049556665"/>
+      <inertia ixx="6.2992604e-07" ixy="2.909333e-11" ixz="-1.4156373e-11" iyy="5.0833639e-07" iyz="1.2241355e-07" izz="6.9844918e-07"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/hand/P_DIP.STL"/>
+      </geometry>
+      <material name="hand_gray">
+        <color rgba="0.698039 0.698039 0.698039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/hand/P_DIP.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Pinky_DIP" type="revolute">
+    <parent link="P_PIP"/>
+    <child link="P_DIP"/>
+    <origin xyz="0 0.0465 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1.2575097" upper="0.0" effort="5" velocity="3.0"/>
+  </joint>
+
+</robot>

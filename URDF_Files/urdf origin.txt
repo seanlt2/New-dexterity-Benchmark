@@ -1,0 +1,46 @@
+"URDF_v4_Right" is the URDF for the TRI Softhand
+
+The following URDF files originate from dex-urdf repository
+-ability_hand
+-allegro_hand
+-barret_hand
+-dclaw_gripper
+-inspire_hand
+-leap_hand
+-panda_gripper
+-schunk_hand
+-shadow_hand
+
+The creators ask that the following work be cited if URDFs their urdf files are used
+
+@article{bunny-visionpro,
+    title={Bunny-VisionPro: Real-Time Bimanual Dexterous Teleoperation for Imitation Learning},
+    author={Runyu Ding and Yuzhe Qin and Jiyue Zhu and Chengzhe Jia and Shiqi Yang and Ruihan Yang and Xiaojuan Qi and Xiaolong Wang},
+    year={2024},
+    url={https://arxiv.org/abs/2407.03162},
+}
+
+non arxiv version of the paper
+
+@INPROCEEDINGS{11247017,
+  author={Ding, Runyu and Qin, Yuzhe and Zhu, Jiyue and Jia, Chengzhe and Yang, Shiqi and Yang, Ruihan and Qi, Xiaojuan and Wang, Xiaolong},
+  booktitle={2025 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)}, 
+  title={Bunny-VisionPro: Real-Time Bimanual Dexterous Teleoperation for Imitation Learning}, 
+  year={2025},
+  volume={},
+  number={},
+  pages={12248-12255},
+  keywords={Hands;Tracking loops;Accuracy;Imitation learning;Robot kinematics;Web pages;Real-time systems;Safety;Haptic interfaces;Collision avoidance},
+  doi={10.1109/IROS60139.2025.11247017}}
+
+The following hands were downloaded from the Mujoco menagerie and converted into URDF format
+-sharpa wave
+-shadow Dex EE hand
+
+link 
+https://github.com/google-deepmind/mujoco_menagerie/tree/main
+
+
+Tesollo Urdf Files originate from here
+
+https://github.com/tesollodelto/tesollo_model
