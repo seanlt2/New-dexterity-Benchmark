@@ -12,10 +12,14 @@ voxel-grid pairwise/N-way intersection method is no longer computed here;
 see python/opposability.py for the sphere-based replacement.)
 
 Usage:
-    ~/miniconda3/bin/python3 opposability_calculation.py
-    (or: conda activate base && python3 opposability_calculation.py)
+    ~/miniconda3/bin/python3 opposability_calculation.py [--hand NAME]
+    (or: conda activate base && python3 opposability_calculation.py --hand NAME)
 
-To switch hands, uncomment the desired config block and comment out the active one.
+Pass --hand to select which hand config to run (see HAND_CONFIGS below for
+valid names; --help lists them); defaults to DEFAULT_HAND. manipulation_
+capacity_test.py and leap_hand_grasp_figures.py both import their hand
+config from this module too, so passing --hand to either of their
+run_*.sh wrappers selects the same hand for them as well.
 
 Outputs (relative to project root):
     <save_folder>/workspace_volumes/
@@ -44,6 +48,7 @@ if sys.version_info < (3, 10):
         "  conda activate base && python3 opposability_calculation.py"
     )
 
+import argparse
 import os
 import pickle
 import threading
@@ -78,266 +83,601 @@ from python import (
 FINGER_ID = {"Thumb": 1, "Index": 2, "Pinkie": 3, "Middle": 4, "Ring": 5}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Hand configurations — uncomment the block you want to run
+# Hand configurations
+# ─────────────────────────────────────────────────────────────────────────────
+# Select which one is active with --hand NAME (see HAND_CONFIGS' keys below
+# for valid names; defaults to DEFAULT_HAND). Everything a hand config used
+# to need as a bare module-level constant -- FINGER_BODIES, MESH_SCALE,
+# URDF_FILE, MESH_FOLDER, SAVE_FOLDER, HOME_ACTUATED -- now lives together in
+# one dict entry, so switching hands is a single flag instead of
+# hand-editing which block is commented out.
+#
+# opposability_groups: list[tuple[group, radius]] -- which finger
+# combinations to test for an opposable grasp, and the sphere radius (m) to
+# test each one with. Each group is computed (and plotted/saved) separately,
+# rather than requiring every active finger to simultaneously reach and
+# oppose the same sphere. Not every reachable-and-opposable combination is a
+# *useful* grasp for a given hand's mechanism (e.g. two fingers that can
+# only flex in parallel won't form an effective pinch even if they can
+# geometrically reach the same sphere from roughly opposite sides), so pick
+# the combinations that make sense for the hand. Group names must be keys
+# of finger_bodies. Hands that were never actually run with a specific set
+# leave this as []. A radius of None means "no override" -- a Thumb+Pinkie
+# pinch is only ever going to close around something much smaller than a
+# full Thumb+Index+Middle+Ring+Pinkie power grasp, for example, so most
+# hands below give every group its own explicit radius, but a group can
+# fall back to the shared GRASP_SPHERE_RADIUS by using None instead.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ## Soft Hand
-# FINGER_BODIES = {
-#     "Thumb":  ["CMC", "Link1_Thumb", "Fingertip_Thumb"],
-#     "Index":  ["Abd_Add_Index", "Link1_Index", "Fingertip_Index"],
-#     "Middle": ["none"],
-#     "Ring":   ["none"],
-#     "Pinkie": ["Abd_Add_Pinkie", "Link1_Pinkie", "Fingertip_Pinkie"],
-#     "Palm":   ["none"],
-# }
-# MESH_SCALE   = 1.0
-# URDF_FILE    = "URDF_Files/URDF_v4_Right/urdf/URDF_v4_Right.urdf"
-# MESH_FOLDER  = "URDF_Files/URDF_v4_Right/meshes/"
-# SAVE_FOLDER  = "Opposability/URDF_v4_Right"
-# HOME_ACTUATED = None   # use zero/neutral
-
-## Leap Hand
-FINGER_BODIES = {
-    "Thumb":  ["thumb_temp_base", "thumb_pip", "thumb_dip", "thumb_fingertip"],
-    "Index":  ["mcp_joint", "pip", "dip", "fingertip"],
-    "Middle": ["mcp_joint_2", "pip_2", "dip_2", "fingertip_2"],
-    "Ring":   ["none"],
-    "Pinkie": ["mcp_joint_3", "pip_3", "dip_3", "fingertip_3"],
-    "Palm":   ["palm_lower"],
+HAND_CONFIGS: dict[str, dict] = {
+    "soft_hand": dict(
+        finger_bodies={
+            "Thumb":  ["CMC", "Link1_Thumb", "Fingertip_Thumb"],
+            "Index":  ["Abd_Add_Index", "Link1_Index", "Fingertip_Index"],
+            "Middle": ["none"],
+            "Ring":   ["none"],
+            "Pinkie": ["Abd_Add_Pinkie", "Link1_Pinkie", "Fingertip_Pinkie"],
+            "Palm":   ["none"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/URDF_v4_Right/urdf/URDF_v4_Right.urdf",
+        mesh_folder="URDF_Files/URDF_v4_Right/meshes/",
+        save_folder="Opposability/URDF_v4_Right",
+        home_actuated=None,   # use zero/neutral
+        opposability_groups=[],
+    ),
+    "ability_hand": dict(
+        finger_bodies={
+            "Thumb":  ["thumb_L1", "thumb_L2"],
+            "Index":  ["index_L1", "index_L2"],
+            "Middle": ["middle_L1", "middle_L2"],
+            "Ring":   ["ring_L1", "ring_L2"],
+            "Pinkie": ["pinky_L1", "pinky_L2"],
+            "Palm":   ["base", "thumb_base"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/ability_hand/ability_hand_right_stl.urdf",
+        mesh_folder="URDF_Files/ability_hand/meshes/visual/",
+        save_folder="Opposability/ability_hand",
+        home_actuated=None,
+        opposability_groups=[
+            (("Thumb", "Index"), 0.011),
+            (("Thumb", "Middle"), 0.011),
+            (("Thumb", "Ring"), 0.011),
+            (("Thumb", "Pinkie"), 0.011),
+            (("Thumb", "Index", "Middle"), 0.016),
+            (("Thumb", "Index", "Ring"), 0.016),
+            (("Thumb", "Index", "Pinkie"), 0.016),
+            (("Thumb", "Middle", "Ring"), 0.016),
+            (("Thumb", "Middle", "Pinkie"), 0.016),
+            (("Thumb", "Ring", "Pinkie"), 0.016),
+            (("Thumb", "Index", "Middle", "Ring"), 0.022),
+            (("Thumb", "Index", "Middle", "Pinkie"), 0.022),
+            (("Thumb", "Index", "Ring", "Pinkie"), 0.022),
+            (("Thumb", "Middle", "Ring", "Pinkie"), 0.022),
+            (("Thumb", "Index", "Middle", "Ring", "Pinkie"), 0.027),
+        ],
+    ),
+    "allegro_hand": dict(
+        finger_bodies={
+            "Thumb":  ["link_12.0", "link_13.0", "link_14.0", "link_15.0", "link_15.0_tip"],
+            "Index":  ["link_0.0", "link_1.0", "link_2.0", "link_3.0", "link_3.0_tip"],
+            "Middle": ["link_4.0", "link_5.0", "link_6.0", "link_7.0", "link_7.0_tip"],
+            "Ring":   ["none"],
+            "Pinkie": ["link_8.0", "link_9.0", "link_10.0", "link_11.0", "link_11.0_tip"],
+            "Palm":   ["none"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/allegro_hand/allegro_hand_right_stl.urdf",
+        mesh_folder="URDF_Files/allegro_hand/meshes/visual/",
+        save_folder="Opposability/allegro_hand",
+        home_actuated=None,
+        opposability_groups=[
+            (("Thumb", "Index"), 0.016),
+            (("Thumb", "Middle"), 0.016),
+            (("Thumb", "Pinkie"), 0.016),
+            (("Index", "Middle"), 0.016),
+            (("Index", "Pinkie"), 0.016),
+            (("Middle", "Pinkie"), 0.016),
+            (("Thumb", "Index", "Middle"), 0.024),
+            (("Thumb", "Index", "Pinkie"), 0.024),
+            (("Thumb", "Middle", "Pinkie"), 0.024),
+            (("Index", "Middle", "Pinkie"), 0.024),
+            (("Thumb", "Index", "Middle", "Pinkie"), 0.032),
+        ],
+    ),
+    "allegro_hand_3_finger": dict(
+        finger_bodies={
+            "Thumb":  ["link_6_0", "link_7_0", "link_8_0", "link_8_0_tip"],
+            "Index":  ["link_0_0", "link_1_0", "link_2_0", "link_2_0_tip"],
+            "Middle": ["none"],
+            "Ring":   ["none"],
+            "Pinkie": ["link_4_0", "link_4_0", "link_5_0", "link_5_0_tip"],
+            "Palm":   ["palm_link"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/allegro_hand_3_finger/allegro_hand_3F.urdf",
+        mesh_folder="URDF_Files/allegro_hand_3_finger/meshes/",
+        save_folder="Opposability/allegro_hand_3_finger",
+        home_actuated=None,
+        opposability_groups=[],
+    ),
+    "barrett_hand": dict(
+        finger_bodies={
+            "Thumb":  ["finger_3_med_link", "finger_3_dist_link"],
+            "Index":  ["finger_1_prox_link", "finger_1_med_link", "finger_1_dist_link"],
+            "Middle": ["none"],
+            "Ring":   ["none"],
+            "Pinkie": ["finger_2_prox_link", "finger_2_med_link", "finger_2_dist_link"],
+            "Palm":   ["base_link"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/barrett_hand/bhand_model_stl.urdf",
+        mesh_folder="URDF_Files/barrett_hand/meshes/visual/",
+        save_folder="Opposability/barrett_hand",
+        home_actuated=None,
+        opposability_groups=[],
+    ),
+    "craft_hand": dict(
+        finger_bodies={
+            "Thumb":  ["thumbmcp", "thumb2", "thumb3", "thumb4"],
+            "Index":  ["index1", "index2", "index3", "index4"],
+            "Middle": ["middle1", "middle2", "middle3", "middle4"],
+            "Ring":   ["ring1", "ring2", "ring3", "ring4"],
+            "Pinkie": ["pinky1", "pinky2", "pinky3", "pinky4"],
+            "Palm":   ["base"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/CRAFT_Hand/craft_hand.urdf",
+        mesh_folder="URDF_Files/CRAFT_Hand/meshes/",
+        save_folder="Opposability/CRAFT_Hand",
+        home_actuated=None,
+        opposability_groups=[],
+    ),
+    "dclaw_gripper": dict(
+        finger_bodies={
+            "Thumb":  ["link_f1_1", "link_f1_2", "link_f1_3", "link_f1_head"],
+            "Index":  ["link_f2_1", "link_f2_2", "link_f2_3", "link_f2_head"],
+            "Middle": ["none"],
+            "Ring":   ["none"],
+            "Pinkie": ["link_f3_1", "link_f3_2", "link_f3_3", "link_f3_head"],
+            "Palm":   ["base_link"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/dclaw_gripper/dclaw_gripper_stl.urdf",
+        mesh_folder="URDF_Files/dclaw_gripper/meshes/visual/",
+        save_folder="Opposability/dclaw_gripper",
+        # Home actuated pose -- matches MATLAB: [(-pi/2), -1.7, -1.7, 0]
+        home_actuated=np.array([-np.pi / 2, -1.7, -1.7, 0.0]),
+        opposability_groups=[],
+    ),
+    "inspire_hand": dict(
+        finger_bodies={
+            "Thumb":  ["thumb_proximal_base", "thumb_proximal", "thumb_intermediate", "thumb_distal"],
+            "Index":  ["index_proximal", "index_intermediate"],
+            "Middle": ["middle_proximal", "middle_intermediate"],
+            "Ring":   ["ring_proximal", "ring_intermediate"],
+            "Pinkie": ["pinky_proximal", "pinky_intermediate"],
+            "Palm":   ["hand_base_link"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/inspire_hand/inspire_hand_right_stl.urdf",
+        mesh_folder="URDF_Files/inspire_hand/meshes/visual/",
+        save_folder="Opposability/inspire_hand",
+        home_actuated=None,
+        opposability_groups=[],
+    ),
+    "krysalis_hand": dict(
+        finger_bodies={
+            "Thumb":  ["T_CMC", "T_MCP", "T_IP"],
+            "Index":  ["I_Below_MCP", "I_MCP", "I_PIP", "I_DIP"],
+            "Middle": ["M_MCP", "M_PIP", "M_DIP"],
+            "Ring":   ["R_Below_MCP", "R_MCP", "R_PIP", "R_DIP"],
+            "Pinkie": ["P_Below_MCP", "P_MCP", "P_PIP", "P_DIP"],
+            "Palm":   ["Knuckle_Holder"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/Krysalis_hand/hand.urdf",
+        mesh_folder="URDF_Files/Krysalis_hand/meshes/",
+        save_folder="Opposability/Krysalis_hand",
+        home_actuated=None,
+        opposability_groups=[
+            (("Thumb", "Index"), 123456),
+            (("Thumb", "Middle"), 123456),
+            (("Thumb", "Ring"), 123456),
+            (("Thumb", "Pinkie"), 123456),
+            (("Index", "Middle"), 123456),
+            (("Index", "Pinkie"), 123456),
+            (("Middle", "Ring"), 123456),
+            (("Middle", "Pinkie"), 123456),
+            (("Thumb", "Index", "Middle"), 123456),
+            (("Thumb", "Index", "Ring"), 123456),
+            (("Thumb", "Index", "Pinkie"), 123456),
+            (("Thumb", "Middle", "Ring"), 123456),
+            (("Thumb", "Middle", "Pinkie"), 123456),
+            (("Thumb", "Ring", "Pinkie"), 123456),
+            (("Thumb", "Index", "Middle", "Ring"), 123456),
+            (("Thumb", "Index", "Middle", "Pinkie"), 123456),
+            (("Thumb", "Index", "Ring", "Pinkie"), 123456),
+            (("Thumb", "Middle", "Ring", "Pinkie"), 123456),
+            (("Thumb", "Index", "Middle", "Ring", "Pinkie"), 123456),
+        ],
+    ),
+    "leap_hand": dict(
+        finger_bodies={
+            "Thumb":  ["thumb_temp_base", "thumb_pip", "thumb_dip", "thumb_fingertip"],
+            "Index":  ["mcp_joint", "pip", "dip", "fingertip"],
+            "Middle": ["mcp_joint_2", "pip_2", "dip_2", "fingertip_2"],
+            "Ring":   ["none"],
+            "Pinkie": ["mcp_joint_3", "pip_3", "dip_3", "fingertip_3"],
+            "Palm":   ["palm_lower"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/leap_hand/leap_hand_right_stl.urdf",
+        mesh_folder="URDF_Files/leap_hand/meshes/visual/",
+        save_folder="Opposability/leap_hand",
+        home_actuated=None,
+        opposability_groups=[
+            (("Thumb", "Index"), 0.021),
+            (("Thumb", "Middle"), 0.021),
+            (("Thumb", "Pinkie"), 0.021),
+            (("Index", "Middle"), 0.021),
+            (("Index", "Pinkie"), 0.021),
+            (("Middle", "Pinkie"), 0.021),
+            (("Thumb", "Index", "Middle"), 0.032),
+            (("Thumb", "Index", "Pinkie"), 0.032),
+            (("Thumb", "Middle", "Pinkie"), 0.032),
+            (("Index", "Middle", "Pinkie"), 0.032),
+            (("Thumb", "Index", "Middle", "Pinkie"), 0.043),
+        ],
+    ),
+    "orca_hand": dict(
+        finger_bodies={
+            "Thumb":  ["none",],
+            "Index":  ["none",],
+            "Middle": ["none",],
+            "Ring":   ["none",],
+            "Pinkie": ["none",],
+            "Palm":   ["none",],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/Orca_Hand/models/urdf/orcahand_right.urdf",
+        mesh_folder="URDF_Files/Orca_Hand/assets/urdf/",
+        save_folder="Opposability/Orca_Hand",
+        home_actuated=None,
+        opposability_groups=[],
+    ),
+    "rapid_hand": dict(
+        finger_bodies={
+            "Thumb":  ["TMCPF","TMCPS","TPIP","TDIP"],
+            "Index":  ["IMCPF","IMCPS","IPIP","IDIP"],
+            "Middle": ["MMCPF","MMCPS","MPIP","MDIP"],
+            "Ring":   ["RMCPF","RMCPS","RPIP","RDIP"],
+            "Pinkie": ["LMCPF","LMCPS","LPIP","LDIP"],
+            "Palm":   ["BASE",],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/Rapid_Hand/urdf/rapidhand.urdf",
+        mesh_folder="URDF_Files/Rapid_Hand/meshes/",
+        save_folder="Opposability/Rapid_Hand",
+        home_actuated=None,
+        opposability_groups=[],
+    ),
+    "HX5_D20": dict(
+        finger_bodies={
+            "Thumb":  ["finger_r_link1","finger_r_link2","finger_r_link3","finger_r_link4"],
+            "Index":  ["finger_r_link5","finger_r_link6","finger_r_link7","finger_r_link8"],
+            "Middle": ["finger_r_link9","finger_r_link10","finger_r_link11","finger_r_link12"],
+            "Ring":   ["finger_r_link13","finger_r_link14","finger_r_link15","finger_r_link16"],
+            "Pinkie": ["finger_r_link17","finger_r_link18","finger_r_link19","finger_r_link20"],
+            "Palm":   ["hx5_d20_right_base",],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/HX5_D20_Right/hx5_d20_right.urdf",
+        mesh_folder="URDF_Files/HX5_D20_Right/meshes/",
+        save_folder="Opposability/HX5_D20",
+        home_actuated=None,
+        opposability_groups=[],
+    ),
+    "ruka_hand": dict(
+        finger_bodies={
+            "Thumb":  ["Thumb_MCP_Link", "Thumb_DIP_Link", "Thumb_PIP_Link"],
+            "Index":  ["Index_MCP_Link", "Index_DIP_Link", "Index_PIP_Link"],
+            "Middle": ["Middle_MCP_Link", "Middle_DIP_Link", "Middle_PIP_Link"],
+            "Ring":   ["Ring_MCP_Link", "Ring_DIP_Link", "Ring_PIP_Link"],
+            "Pinkie": ["Pinky_MCP_Link", "Pinky_DIP_Link", "Pinky_PIP_Link"],
+            "Palm":   ["Palm_Link"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/ruka_hand/ruka_hand.urdf",
+        mesh_folder="URDF_Files/ruka_hand/meshes/",
+        save_folder="Opposability/ruka_hand",
+        home_actuated=None,
+        opposability_groups==[
+            (("Thumb", "Index"), 123456),
+            (("Thumb", "Middle"), 123456),
+            (("Thumb", "Ring"), 123456),
+            (("Thumb", "Pinkie"), 123456),
+            (("Thumb", "Index", "Middle"), 123456),
+            (("Thumb", "Index", "Ring"), 123456),
+            (("Thumb", "Index", "Pinkie"), 123456),
+            (("Thumb", "Middle", "Ring"), 123456),
+            (("Thumb", "Middle", "Pinkie"), 123456),
+            (("Thumb", "Ring", "Pinkie"), 123456),
+            (("Thumb", "Index", "Middle", "Ring"), 123456),
+            (("Thumb", "Index", "Middle", "Pinkie"), 123456),
+            (("Thumb", "Index", "Ring", "Pinkie"), 123456),
+            (("Thumb", "Middle", "Ring", "Pinkie"), 123456),
+            (("Thumb", "Index", "Middle", "Ring", "Pinkie"), 123456),
+        ],
+    ),
+    "shadow_hand": dict(
+        finger_bodies={
+            "Thumb":  ["thbase", "thproximal", "thhub", "thmiddle", "thdistal"],
+            "Index":  ["ffknuckle", "ffproximal", "ffmiddle", "ffdistal"],
+            "Middle": ["mfknuckle", "mfproximal", "mfmiddle", "mfdistal"],
+            "Ring":   ["rfknuckle", "rfproximal", "rfmiddle", "rfdistal"],
+            "Pinkie": ["lfmetacarpal", "lfknuckle", "lfproximal", "lfmiddle", "lfdistal"],
+            "Palm":   ["palm"],
+        },
+        mesh_scale=0.001,
+        urdf_file="URDF_Files/shadow_hand/shadow_hand_right_coupled_stl.urdf",
+        mesh_folder="URDF_Files/shadow_hand/meshes/visual/",
+        save_folder="Opposability/shadow_hand",
+        home_actuated=None,
+        opposability_groups=[],
+    ),
+    "shadow_dexee": dict(
+        finger_bodies={
+            "Thumb":  ["none"],
+            "Index":  ["none"],
+            "Middle": ["none"],
+            "Ring":   ["none"],
+            "Pinkie": ["none"],
+            "Palm":   ["none"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/shadow_dexee/shadow_dexee.urdf",
+        mesh_folder="URDF_Files/shadow_dexee/meshes/",
+        save_folder="Opposability/shadow_dexee",
+        home_actuated=None,
+        opposability_groups=[],
+    ),
+    "sharpa_wave_hand": dict(
+        finger_bodies={
+            "Thumb":  ["right_thumb_CMC_VL", "right_thumb_MC", "right_thumb_MCP_VL", "right_thumb_PP", "right_thumb_DP"],
+            "Index":  ["right_index_MCP_VL", "right_index_PP", "right_index_MP", "right_index_DP"],
+            "Middle": ["right_middle_MCP_VL", "right_middle_PP", "right_middle_MP", "right_middle_DP"],
+            "Ring":   ["right_ring_MCP_VL", "right_ring_PP", "right_ring_MP", "right_ring_DP"],
+            "Pinkie": ["right_pinky_MC", "right_pinky_MCP_VL", "right_pinky_PP", "right_pinky_MP", "right_pinky_DP"],
+            "Palm":   ["right_hand_C_MC"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/sharpa_wave_hand/right_hand/right_hand.urdf",
+        mesh_folder="URDF_Files/sharpa_wave_hand/right_hand/meshes/",
+        save_folder="Opposability/sharpa_wave_hand/right_hand",
+        home_actuated=None,
+        opposability_groups=[],
+    ),
+    "schunk_hand": dict(
+        finger_bodies={
+            "Thumb":  ["right_hand_a", "right_hand_b", "right_hand_c"],
+            "Index":  ["right_hand_l", "right_hand_p", "right_hand_t"],
+            "Middle": ["right_hand_k", "right_hand_o", "right_hand_s"],
+            "Ring":   ["right_hand_j", "right_hand_n", "right_hand_r"],
+            "Pinkie": ["right_hand_i", "right_hand_m", "right_hand_q"],
+            "Palm":   ["right_hand_e1", "right_hand_z", "right_hand_e2",
+                       "right_hand_virtual_k", "right_hand_virtual_l",
+                       "right_hand_virtual_i", "right_hand_virtual_j"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/schunk_hand/schunk_svh_hand_right_stl.urdf",
+        mesh_folder="URDF_Files/schunk_hand/meshes/visual/",
+        save_folder="Opposability/schunk_hand",
+        home_actuated=None,
+        opposability_groups=[
+            (("Thumb", "Index"), 123456),
+            (("Thumb", "Middle"), 123456),
+            (("Thumb", "Ring"), 123456),
+            (("Thumb", "Pinkie"), 123456),
+            (("Index", "Middle"), 123456),
+            (("Index", "Ring"), 123456),
+            (("Index", "Pinkie"), 123456),
+            (("Middle", "Ring"), 123456),
+            (("Middle", "Pinkie"), 123456),
+            (("Thumb", "Index", "Middle"), 123456),
+            (("Thumb", "Index", "Ring"), 123456),
+            (("Thumb", "Index", "Pinkie"), 123456),
+            (("Thumb", "Middle", "Ring"), 123456),
+            (("Thumb", "Middle", "Pinkie"), 123456),
+            (("Thumb", "Ring", "Pinkie"), 123456),
+            (("Thumb", "Index", "Middle", "Ring"), 123456),
+            (("Thumb", "Index", "Middle", "Pinkie"), 123456),
+            (("Thumb", "Index", "Ring", "Pinkie"), 123456),
+            (("Thumb", "Middle", "Ring", "Pinkie"), 123456),
+            (("Thumb", "Index", "Middle", "Ring", "Pinkie"), 123456),
+        ],
+    ),
+    "tesollo_dg3f": dict(
+        finger_bodies={
+            "Thumb":  ["l_dg_1_1", "l_dg_1_2", "l_dg_1_3", "l_dg_1_4", "l_dg_1_tip"],
+            "Index":  ["l_dg_2_1", "l_dg_2_2", "l_dg_2_3", "l_dg_2_4", "l_dg_2_tip"],
+            "Middle": ["none"],
+            "Ring":   ["none"],
+            "Pinkie": ["l_dg_3_1", "l_dg_3_2", "l_dg_3_3", "l_dg_3_4", "l_dg_3_tip"],
+            "Palm":   ["l_dg_base"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/Tesollo_URDF/dg3fm/dg3f_m_stl.urdf",
+        mesh_folder="URDF_Files/Tesollo_URDF/dg3fm/meshes/",
+        save_folder="Opposability/Tesollo/dg3fm",
+        home_actuated=None,
+        opposability_groups=[
+            (("Thumb", "Index"), 0.015),
+            (("Thumb", "Pinkie"), 0.015),
+            (("Index", "Pinkie"), 0.015),
+            (("Thumb", "Index", "Pinkie"), 0.023),
+        ],
+    ),
+    "tesollo_dg4f": dict(
+        finger_bodies={
+            "Thumb":  ["l_dg_1_inner", "l_dg_1_1", "l_dg_1_2", "l_dg_1_3", "l_dg_1_4", "l_dg_1_5", "l_dg_1_tip"],
+            "Index":  ["l_dg_2_1", "l_dg_2_2", "l_dg_2_3", "l_dg_2_4", "l_dg_2_tip"],
+            "Middle": ["l_dg_3_1", "l_dg_3_2", "l_dg_3_3", "l_dg_3_4", "l_dg_3_tip"],
+            "Ring":   ["none"],
+            "Pinkie": ["l_dg_4_inner", "l_dg_4_1", "l_dg_4_2", "l_dg_4_3", "l_dg_4_4", "l_dg_4_5", "l_dg_4_tip"],
+            "Palm":   ["l_dg_base"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/Tesollo_URDF/dg4f/dg3f.urdf",
+        mesh_folder="URDF_Files/Tesollo_URDF/dg4f/meshes/",
+        save_folder="Opposability/Tesollo_URDF/dg4f",
+        home_actuated=None,
+        opposability_groups=[],
+    ),
+    "tesollo_dg5f": dict(
+        finger_bodies={
+            "Thumb":  ["rl_dg_1_1", "rl_dg_1_2", "rl_dg_1_3", "rl_dg_1_4", "rl_dg_1_tip"],
+            "Index":  ["rl_dg_2_1", "rl_dg_2_2", "rl_dg_2_3", "rl_dg_2_4", "rl_dg_2_tip"],
+            "Middle": ["rl_dg_3_1", "rl_dg_3_2", "rl_dg_3_3", "rl_dg_3_4", "rl_dg_3_tip"],
+            "Ring":   ["rl_dg_4_1", "rl_dg_4_2", "rl_dg_4_3", "rl_dg_4_4", "rl_dg_4_tip"],
+            "Pinkie": ["rl_dg_5_1", "rl_dg_5_2", "rl_dg_5_3", "rl_dg_5_4", "rl_dg_5_tip"],
+            "Palm":   ["rl_dg_base", "rl_dg_palm"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/Tesollo_URDF/dg5f/dg5f_right.urdf",
+        mesh_folder="URDF_Files/Tesollo_URDF/dg5f/meshes/",
+        save_folder="Opposability/Tesollo_URDF/dg5f",
+        home_actuated=None,
+        opposability_groups=[],
+    ),
+    "tesollo_dg5fs": dict(
+        finger_bodies={
+            "Thumb":  ["link_1_1", "link_1_2", "link_1_3", "link_1_4", "link_1_tip"],
+            "Index":  ["link_2_1", "link_2_2", "link_2_3", "link_2_4", "link_2_tip"],
+            "Middle": ["link_3_1", "link_3_2", "link_3_3", "link_3_4", "link_3_tip"],
+            "Ring":   ["link_4_1", "link_4_2", "link_4_3", "link_4_4", "link_4_tip"],
+            "Pinkie": ["link_5_1", "link_5_2", "link_5_3", "link_5_4", "link_5_tip"],
+            "Palm":   ["link_base"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/Tesollo_URDF/dg5fs/dg5fs_right.urdf",
+        mesh_folder="URDF_Files/Tesollo_URDF/dg5fs/meshes/",
+        save_folder="Opposability/Tesollo_URDF/dg5fs",
+        home_actuated=None,
+        opposability_groups=[],
+    ),
+    "tesollo_dg5fs_15dof": dict(
+        finger_bodies={
+            "Thumb":  ["link_1_1", "link_1_2", "link_1_3", "link_1_tip"],
+            "Index":  ["link_2_1", "link_2_2", "link_2_3", "link_2_tip"],
+            "Middle": ["link_3_1", "link_3_2", "link_3_3", "link_3_tip"],
+            "Ring":   ["link_4_1", "link_4_2", "link_4_3", "link_4_tip"],
+            "Pinkie": ["link_5_1", "link_5_2", "link_5_3", "link_5_tip"],
+            "Palm":   ["link_base"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/Tesollo_URDF/dg5fs/dg5fs_15dof_right.urdf",
+        mesh_folder="URDF_Files/Tesollo_URDF/dg5fs/meshes/",
+        save_folder="Opposability/Tesollo_URDF/dg5fs_15dof",
+        home_actuated=None,
+        opposability_groups=[],
+    ),
+    "unitree_dex3": dict(
+        finger_bodies={
+            "Thumb":  ["right_hand_thumb_0_link", "right_hand_thumb_1_link", "right_hand_thumb_2_link"],
+            "Index":  ["right_hand_index_0_link", "right_hand_index_1_link"],
+            "Middle": ["none"],
+            "Ring":   ["none"],
+            "Pinkie": ["right_hand_middle_0_link", "right_hand_middle_1_link"],
+            "Palm":   ["right_hand_palm_link"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/Unitree/dex3_1/dex3_1_r.urdf",
+        mesh_folder="URDF_Files/Unitree/dex3_1/meshes/",
+        save_folder="Opposability/Unitree/dex3_1",
+        home_actuated=None,
+        opposability_groups=[],
+    ),
+    "unitree_dex5": dict(
+        finger_bodies={
+            "Thumb":  ["Link_11R", "Link_12R", "Link_13R", "Link_14R"],
+            "Index":  ["Link_21R", "Link_22R", "Link_23R", "Link_24R"],
+            "Middle": ["Link_31R", "Link_32R", "Link_33R", "Link_34R"],
+            "Ring":   ["Link_41R", "Link_42R", "Link_43R", "Link_44R"],
+            "Pinkie": ["Link_51R", "Link_52R", "Link_53R", "Link_54R"],
+            "Palm":   ["base_link00"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/Unitree/dex5_1/Dex5-URDF-R/Dex5-URDF-R.urdf",
+        mesh_folder="URDF_Files/Unitree/dex5_1/Dex5-URDF-R/meshes/",
+        save_folder="Opposability/Unitree/dex5_1",
+        home_actuated=None,
+        opposability_groups=[],
+    ),
+    "wuji_hand": dict(
+        finger_bodies={
+            "Thumb":  ["right_finger1_link1", "right_finger1_link2", "right_finger1_link3", "right_finger1_link4","right_finger1_tip_link"],
+            "Index":  ["right_finger2_link1", "right_finger2_link2", "right_finger2_link3", "right_finger2_link4","right_finger2_tip_link"],
+            "Middle": ["right_finger3_link1", "right_finger3_link2", "right_finger3_link3", "right_finger3_link4","right_finger3_tip_link"],
+            "Ring":   ["right_finger4_link1", "right_finger4_link2", "right_finger4_link3", "right_finger4_link4","right_finger4_tip_link"],
+            "Pinkie": ["right_finger5_link1", "right_finger5_link2", "right_finger5_link3", "right_finger5_link4","right_finger5_tip_link"],
+            "Palm":   ["right_palm_link"],
+        },
+        mesh_scale=1.0,
+        urdf_file="URDF_Files/Wuji_Hand/urdf/right.urdf",
+        mesh_folder="URDF_Files/Wuji_Hand/meshes/right/",
+        save_folder="Opposability/Wuji_Hand",
+        home_actuated=None,
+        opposability_groups=[],
+    ),
 }
-MESH_SCALE   = 1.0
-URDF_FILE    = "URDF_Files/leap_hand/leap_hand_right_stl.urdf"
-MESH_FOLDER  = "URDF_Files/leap_hand/meshes/visual/"
-SAVE_FOLDER  = "Opposability/leap_hand"
-HOME_ACTUATED = None
 
-# ## Schunk Hand
-# FINGER_BODIES = {
-#     "Thumb":  ["right_hand_a", "right_hand_b", "right_hand_c"],
-#     "Index":  ["right_hand_l", "right_hand_p", "right_hand_t"],
-#     "Middle": ["right_hand_k", "right_hand_o", "right_hand_s"],
-#     "Ring":   ["right_hand_j", "right_hand_n", "right_hand_r"],
-#     "Pinkie": ["right_hand_i", "right_hand_m", "right_hand_q"],
-#     "Palm":   ["right_hand_e1", "right_hand_z", "right_hand_e2",
-#                "right_hand_virtual_k", "right_hand_virtual_l",
-#                "right_hand_virtual_i", "right_hand_virtual_j"],
-# }
-# MESH_SCALE   = 1.0
-# URDF_FILE    = "URDF_Files/schunk_hand/schunk_svh_hand_right_stl.urdf"
-# MESH_FOLDER  = "URDF_Files/schunk_hand/meshes/visual/"
-# SAVE_FOLDER  = "Opposability/schunk_hand"
-# HOME_ACTUATED = None
+DEFAULT_HAND = "leap_hand"
 
-# ## Barrett Hand
-# FINGER_BODIES = {
-#     "Thumb":  ["finger_3_med_link", "finger_3_dist_link"],
-#     "Index":  ["finger_1_prox_link", "finger_1_med_link", "finger_1_dist_link"],
-#     "Middle": ["none"],
-#     "Ring":   ["none"],
-#     "Pinkie": ["finger_2_prox_link", "finger_2_med_link", "finger_2_dist_link"],
-#     "Palm":   ["base_link"],
-# }
-# MESH_SCALE   = 1.0
-# URDF_FILE    = "URDF_Files/barrett_hand/bhand_model_stl.urdf"
-# MESH_FOLDER  = "URDF_Files/barrett_hand/meshes/visual/"
-# SAVE_FOLDER  = "Opposability/barrett_hand"
-# HOME_ACTUATED = None
+_parser = argparse.ArgumentParser(
+    description="Compute per-finger workspace volumes and opposable grasp "
+                 "volumes for a robotic hand.",
+)
+_parser.add_argument(
+    "--hand",
+    choices=sorted(HAND_CONFIGS),
+    default=DEFAULT_HAND,
+    help=f"Which hand config to use (default: {DEFAULT_HAND}).",
+)
+# parse_known_args(), not parse_args(): this module is imported (re-running
+# everything above) by manipulation_capacity_test.py and
+# leap_hand_grasp_figures.py too, so it must tolerate whatever other args
+# the invoking script's own sys.argv happens to carry rather than erroring
+# out on them. --hand and --help/-h still work normally either way, so
+# passing --hand to any of the three scripts' run_*.sh wrappers selects the
+# same hand for all of them.
+_cli_args, _ = _parser.parse_known_args()
+ACTIVE_HAND = _cli_args.hand
 
-# ## Shadow Hand
-# FINGER_BODIES = {
-#     "Thumb":  ["thbase", "thproximal", "thhub", "thmiddle", "thdistal"],
-#     "Index":  ["ffknuckle", "ffproximal", "ffmiddle", "ffdistal"],
-#     "Middle": ["mfknuckle", "mfproximal", "mfmiddle", "mfdistal"],
-#     "Ring":   ["rfknuckle", "rfproximal", "rfmiddle", "rfdistal"],
-#     "Pinkie": ["lfmetacarpal", "lfknuckle", "lfproximal", "lfmiddle", "lfdistal"],
-#     "Palm":   ["palm"],
-# }
-# MESH_SCALE   = 0.001
-# URDF_FILE    = "URDF_Files/shadow_hand/shadow_hand_right_coupled_stl.urdf"
-# MESH_FOLDER  = "URDF_Files/shadow_hand/meshes/visual/"
-# SAVE_FOLDER  = "Opposability/shadow_hand"
-# HOME_ACTUATED = None
+_active_cfg = HAND_CONFIGS[ACTIVE_HAND]
+FINGER_BODIES  = _active_cfg["finger_bodies"]
+MESH_SCALE     = _active_cfg["mesh_scale"]
+URDF_FILE      = _active_cfg["urdf_file"]
+MESH_FOLDER    = _active_cfg["mesh_folder"]
+SAVE_FOLDER    = _active_cfg["save_folder"]
+HOME_ACTUATED  = _active_cfg["home_actuated"]
 
-# ## Allegro Hand
-# FINGER_BODIES = {
-#     "Thumb":  ["link_12.0", "link_13.0", "link_14.0", "link_15.0", "link_15.0_tip"],
-#     "Index":  ["link_0.0", "link_1.0", "link_2.0", "link_3.0", "link_3.0_tip"],
-#     "Middle": ["link_4.0", "link_5.0", "link_6.0", "link_7.0", "link_7.0_tip"],
-#     "Ring":   ["none"],
-#     "Pinkie": ["link_8.0", "link_9.0", "link_10.0", "link_11.0", "link_11.0_tip"],
-#     "Palm":   ["none"],
-# }
-# MESH_SCALE   = 1.0
-# URDF_FILE    = "URDF_Files/allegro_hand/allegro_hand_right_stl.urdf"
-# MESH_FOLDER  = "URDF_Files/allegro_hand/meshes/visual/"
-# SAVE_FOLDER  = "Opposability/allegro_hand"
-# HOME_ACTUATED = None
+# opposability_groups is stored as a single (group, radius) list per hand
+# (one source of truth instead of a separate groups list + radii dict that
+# had to be kept in sync); expand it here into the two forms the rest of
+# this module -- and manipulation_capacity_test.py / leap_hand_grasp_figures
+# .py, which import OPPOSABILITY_GROUP_RADII directly -- already expect.
+# A radius of None means "no override", i.e. use GRASP_SPHERE_RADIUS.
+OPPOSABILITY_GROUPS = [group for group, _radius in _active_cfg["opposability_groups"]]
+OPPOSABILITY_GROUP_RADII = {
+    group: radius
+    for group, radius in _active_cfg["opposability_groups"]
+    if radius is not None
+}
 
-# ## Allegro Hand 3 Fingers
-# FINGER_BODIES = {
-#     "Thumb":  ["link_6_0", "link_7_0", "link_8_0", "link_8_0_tip"],
-#     "Index":  ["link_0_0", "link_1_0", "link_2_0", "link_2_0_tip"],
-#     "Middle": ["none"],
-#     "Ring":   ["none"],
-#     "Pinkie": ["link_4_0", "link_4_0", "link_5_0", "link_5_0_tip"],
-#     "Palm":   ["palm_link"],
-# }
-# MESH_SCALE   = 1.0
-# URDF_FILE    = "URDF_Files/allegro_hand_3_finger/allegro_hand_3F.urdf"
-# MESH_FOLDER  = "URDF_Files/allegro_hand_3_finger/meshes/"
-# SAVE_FOLDER  = "Opposability/allegro_hand_3_finger"
-# HOME_ACTUATED = None
-
-# ## Ability Hand
-# FINGER_BODIES = {
-#     "Thumb":  ["thumb_L1", "thumb_L2"],
-#     "Index":  ["index_L1", "index_L2"],
-#     "Middle": ["middle_L1", "middle_L2"],
-#     "Ring":   ["ring_L1", "ring_L2"],
-#     "Pinkie": ["pinky_L1", "pinky_L2"],
-#     "Palm":   ["base", "thumb_base"],
-# }
-# MESH_SCALE   = 1.0
-# URDF_FILE    = "URDF_Files/ability_hand/ability_hand_right_stl.urdf"
-# MESH_FOLDER  = "URDF_Files/ability_hand/meshes/visual/"
-# SAVE_FOLDER  = "Opposability/ability_hand"
-# HOME_ACTUATED = None
-
-# ## Inspire Hand
-# FINGER_BODIES = {
-#     "Thumb":  ["thumb_proximal_base", "thumb_proximal", "thumb_intermediate", "thumb_distal"],
-#     "Index":  ["index_proximal", "index_intermediate"],
-#     "Middle": ["middle_proximal", "middle_intermediate"],
-#     "Ring":   ["ring_proximal", "ring_intermediate"],
-#     "Pinkie": ["pinky_proximal", "pinky_intermediate"],
-#     "Palm":   ["hand_base_link"],
-# }
-# MESH_SCALE   = 1.0
-# URDF_FILE    = "URDF_Files/inspire_hand/inspire_hand_right_stl.urdf"
-# MESH_FOLDER  = "URDF_Files/inspire_hand/meshes/visual/"
-# SAVE_FOLDER  = "Opposability/inspire_hand"
-# HOME_ACTUATED = None
-
-## D'Claw Gripper  ← ACTIVE
-# FINGER_BODIES = {
-#     "Thumb":  ["link_f1_1", "link_f1_2", "link_f1_3", "link_f1_head"],
-#     "Index":  ["link_f2_1", "link_f2_2", "link_f2_3", "link_f2_head"],
-#     "Middle": ["none"],
-#     "Ring":   ["none"],
-#     "Pinkie": ["link_f3_1", "link_f3_2", "link_f3_3", "link_f3_head"],
-#     "Palm":   ["base_link"],
-# }
-# MESH_SCALE    = 1.0
-# URDF_FILE     = "URDF_Files/dclaw_gripper/dclaw_gripper_stl.urdf"
-# MESH_FOLDER   = "URDF_Files/dclaw_gripper/meshes/visual/"
-# SAVE_FOLDER   = "Opposability/dclaw_gripper"
-# # Home actuated pose — matches MATLAB: [(-pi/2), -1.7, -1.7, 0]
-# HOME_ACTUATED = np.array([-np.pi / 2, -1.7, -1.7, 0.0])
-
-# ## Ruka Hand
-# FINGER_BODIES = {
-#     "Thumb":  ["Thumb_MCP_Link", "Thumb_DIP_Link", "Thumb_PIP_Link"],
-#     "Index":  ["Index_MCP_Link", "Index_DIP_Link", "Index_PIP_Link"],
-#     "Middle": ["Middle_MCP_Link", "Middle_DIP_Link", "Middle_PIP_Link"],
-#     "Ring":   ["Ring_MCP_Link", "Ring_DIP_Link", "Ring_PIP_Link"],
-#     "Pinkie": ["Pinky_MCP_Link", "Pinky_DIP_Link", "Pinky_PIP_Link"],
-#     "Palm":   ["Palm_Link"],
-# }
-# MESH_SCALE   = 1.0
-# URDF_FILE    = "URDF_Files/ruka_hand/ruka_hand.urdf"
-# MESH_FOLDER  = "URDF_Files/ruka_hand/meshes/"
-# SAVE_FOLDER  = "Opposability/ruka_hand"
-# HOME_ACTUATED = None
-
-# ## Sharpa Wave Hand
-# FINGER_BODIES = {
-#     "Thumb":  ["right_thumb_CMC_VL", "right_thumb_MC", "right_thumb_MCP_VL", "right_thumb_PP", "right_thumb_DP"],
-#     "Index":  ["right_index_MCP_VL", "right_index_PP", "right_index_MP", "right_index_DP"],
-#     "Middle": ["right_middle_MCP_VL", "right_middle_PP", "right_middle_MP", "right_middle_DP"],
-#     "Ring":   ["right_ring_MCP_VL", "right_ring_PP", "right_ring_MP", "right_ring_DP"],
-#     "Pinkie": ["right_pinky_MC", "right_pinky_MCP_VL", "right_pinky_PP", "right_pinky_MP", "right_pinky_DP"],
-#     "Palm":   ["right_hand_C_MC"],
-# }
-# MESH_SCALE   = 1.0
-# URDF_FILE    = "URDF_Files/sharpa_wave_hand/right_hand/right_hand.urdf"
-# MESH_FOLDER  = "URDF_Files/sharpa_wave_hand/right_hand/meshes/"
-# SAVE_FOLDER  = "Opposability/sharpa_wave_hand/right_hand"
-# HOME_ACTUATED = None
-
-# ## Tesollo DG3F
-# FINGER_BODIES = {
-#     "Thumb":  ["l_dg_1_1", "l_dg_1_2", "l_dg_1_3", "l_dg_1_4","l_dg_1_tip"],
-#     "Index":  ["l_dg_2_1", "l_dg_2_2", "l_dg_2_3", "l_dg_2_4","l_dg_2_tip"],
-#     "Middle": ["none"],
-#     "Ring":   ["none"],
-#     "Pinkie": ["l_dg_3_1", "l_dg_3_2", "l_dg_3_3", "l_dg_3_4","l_dg_3_tip"],
-#     "Palm":   ["l_dg_base"],
-# }
-# MESH_SCALE   = 1.0
-# URDF_FILE    = "URDF_Files/Tesollo_URDF/dg3fm/dg3f_m_stl.urdf"
-# MESH_FOLDER  = "URDF_Files/Tesollo_URDF/dg3fm/meshes/"
-# SAVE_FOLDER  = "Opposability/Tesollo/dg3fm"
-# HOME_ACTUATED = None
-
-# ## Tesollo DG4F
-# FINGER_BODIES = {
-#     "Thumb":  ["l_dg_1_inner","l_dg_1_1", "l_dg_1_2", "l_dg_1_3", "l_dg_1_4","l_dg_1_5","l_dg_1_tip"],
-#     "Index":  ["l_dg_2_1", "l_dg_2_2", "l_dg_2_3", "l_dg_2_4","l_dg_2_tip"],
-#     "Middle": ["l_dg_3_1", "l_dg_3_2", "l_dg_3_3", "l_dg_3_4","l_dg_3_tip"],
-#     "Ring":   ["none"],
-#     "Pinkie": ["l_dg_4_inner","l_dg_4_1", "l_dg_4_2", "l_dg_4_3", "l_dg_4_4","l_dg_4_5","l_dg_4_tip"],
-#     "Palm":   ["l_dg_base"],
-# }
-# MESH_SCALE   = 1.0
-# URDF_FILE    = "URDF_Files/Tesollo_URDF/dg4f/dg3f.urdf"
-# MESH_FOLDER  = "URDF_Files/Tesollo_URDF/dg4f/meshes/"
-# SAVE_FOLDER  = "Opposability/Tesollo_URDF/dg4f"
-# HOME_ACTUATED = None
-
-# ## Tesollo DG5F
-# FINGER_BODIES = {
-#     "Thumb":  ["rl_dg_1_1", "rl_dg_1_2", "rl_dg_1_3", "rl_dg_1_4","rl_dg_1_tip"],
-#     "Index":  ["rl_dg_2_1", "rl_dg_2_2", "rl_dg_2_3", "rl_dg_2_4","rl_dg_2_tip"],
-#     "Middle": ["rl_dg_3_1", "rl_dg_3_2", "rl_dg_3_3", "rl_dg_3_4","rl_dg_3_tip"],
-#     "Ring":   ["rl_dg_4_1", "rl_dg_4_2", "rl_dg_4_3", "rl_dg_4_4","rl_dg_4_tip"],
-#     "Pinkie": ["rl_dg_5_1", "rl_dg_5_2", "rl_dg_5_3", "rl_dg_5_4","rl_dg_5_tip"],
-#     "Palm":   ["rl_dg_base","rl_dg_palm"],
-# }
-# MESH_SCALE   = 1.0
-# URDF_FILE    = "URDF_Files/Tesollo_URDF/dg5f/dg5f_right.urdf"
-# MESH_FOLDER  = "URDF_Files/Tesollo_URDF/dg5f/meshes/"
-# SAVE_FOLDER  = "Opposability/Tesollo_URDF/dg5f"
-# HOME_ACTUATED = None
-
-# ## Tesollo DG5FS
-# FINGER_BODIES = {
-#     "Thumb":  ["link_1_1", "link_1_2", "link_1_3", "link_1_4","link_1_tip"],
-#     "Index":  ["link_2_1", "link_2_2", "link_2_3", "link_2_4","link_2_tip"],
-#     "Middle": ["link_3_1", "link_3_2", "link_3_3", "link_3_4","link_3_tip"],
-#     "Ring":   ["link_4_1", "link_4_2", "link_4_3", "link_4_4","link_4_tip"],
-#     "Pinkie": ["link_5_1", "link_5_2", "link_5_3", "link_5_4","link_5_tip"],
-#     "Palm":   ["link_base"],
-# }
-# MESH_SCALE   = 1.0
-# URDF_FILE    = "URDF_Files/Tesollo_URDF/dg5fs/dg5fs_right.urdf"
-# MESH_FOLDER  = "URDF_Files/Tesollo_URDF/dg5fs/meshes/"
-# SAVE_FOLDER  = "Opposability/Tesollo_URDF/dg5fs"
-# HOME_ACTUATED = None
-
-# ## Tesollo DG5FS 15dof
-# FINGER_BODIES = {
-#     "Thumb":  ["link_1_1", "link_1_2", "link_1_3","link_1_tip"],
-#     "Index":  ["link_2_1", "link_2_2", "link_2_3","link_2_tip"],
-#     "Middle": ["link_3_1", "link_3_2", "link_3_3","link_3_tip"],
-#     "Ring":   ["link_4_1", "link_4_2", "link_4_3","link_4_tip"],
-#     "Pinkie": ["link_5_1", "link_5_2", "link_5_3","link_5_tip"],
-#     "Palm":   ["link_base"],
-# }
-# MESH_SCALE   = 1.0
-# URDF_FILE    = "URDF_Files/Tesollo_URDF/dg5fs/dg5fs_15dof_right.urdf"
-# MESH_FOLDER  = "URDF_Files/Tesollo_URDF/dg5fs/meshes/"
-# SAVE_FOLDER  = "Opposability/Tesollo_URDF/dg5fs_15dof"
-# HOME_ACTUATED = None
+print(f"Using hand config {ACTIVE_HAND!r} (pass --hand NAME to use another; "
+      f"available: {', '.join(sorted(HAND_CONFIGS))})")
 
 # Grid resolution for workspace sweep
 N_PTS = 40
@@ -368,120 +708,6 @@ MU_TOR = 0.1
 # entries pops up a new blocking figure per group) -- still closes early if
 # you close a window yourself.
 FIGURE_TIMEOUT_SECONDS = 60
-
-# Which finger combinations to test for an opposable grasp -- each tuple is
-# computed (and plotted/saved) separately, rather than requiring every
-# active finger to simultaneously reach and oppose the same sphere. Not
-# every reachable-and-opposable combination is a *useful* grasp for a given
-# hand's mechanism (e.g. two fingers that can only flex in parallel won't
-# form an effective pinch even if they can geometrically reach the same
-# sphere from roughly opposite sides), so pick the combinations that make
-# sense for the active hand. Names must be keys of FINGER_BODIES.
-
-# # Ability Hand
-# OPPOSABILITY_GROUPS: list[tuple[str, ...]] = [
-#     ("Thumb", "Index"),
-#     ("Thumb", "Middle"),
-#     ("Thumb", "Ring"),
-#     ("Thumb", "Pinkie"),
-#     ("Thumb", "Index", "Middle"),
-#     ("Thumb", "Index", "Ring"),
-#     ("Thumb", "Index", "Pinkie"),
-#     ("Thumb", "Middle", "Ring"),
-#     ("Thumb", "Middle", "Pinkie"),
-#     ("Thumb", "Ring", "Pinkie"),
-#     ("Thumb", "Index", "Middle", "Ring"),
-#     ("Thumb", "Index", "Middle", "Pinkie"),
-#     ("Thumb", "Index", "Ring", "Pinkie"),
-#     ("Thumb", "Middle", "Ring", "Pinkie"),
-#     ("Thumb", "Index", "Middle", "Ring", "Pinkie"),
-# ]
-
-# Leap & Allegro Hands
-OPPOSABILITY_GROUPS: list[tuple[str, ...]] = [
-    ("Thumb", "Index"),
-    ("Thumb", "Middle"),
-    ("Thumb", "Pinkie"),
-    ("Index", "Middle"),
-    ("Index", "Pinkie"),
-    ("Middle", "Pinkie"),
-    ("Thumb", "Index", "Middle"),
-    ("Thumb", "Index", "Pinkie"),
-    ("Thumb", "Middle", "Pinkie"),
-    ("Index", "Middle", "Pinkie"),
-    ("Thumb", "Index", "Middle", "Pinkie"),
-]
-
-# # Tesollo DG3FM Hand
-# OPPOSABILITY_GROUPS: list[tuple[str, ...]] = [
-#     ("Thumb", "Index"),
-#     ("Thumb", "Pinkie"),    
-#     ("Index", "Pinkie"),
-#     ("Thumb", "Index", "Pinkie"),
-# ]
-
-# Per-group sphere radius overrides (m) -- a Thumb+Pinkie pinch is only ever
-# going to close around something much smaller than a full
-# Thumb+Index+Middle+Ring+Pinkie power grasp, for example. Any group in
-# OPPOSABILITY_GROUPS not listed here uses GRASP_SPHERE_RADIUS.
-
-# #Ability Hand
-# OPPOSABILITY_GROUP_RADII: dict[tuple[str, ...], float] = {
-#     ("Thumb", "Index"): 0.011,
-#     ("Thumb", "Middle"): 0.011,
-#     ("Thumb", "Ring"): 0.011,
-#     ("Thumb", "Pinkie"): 0.011,
-#     ("Thumb", "Index", "Middle"): 0.016,
-#     ("Thumb", "Index", "Ring"): 0.016,
-#     ("Thumb", "Index", "Pinkie"): 0.016,
-#     ("Thumb", "Middle", "Ring"): 0.016,
-#     ("Thumb", "Middle", "Pinkie"): 0.016,
-#     ("Thumb", "Ring", "Pinkie"): 0.016,
-#     ("Thumb", "Index", "Middle", "Ring"): 0.022,
-#     ("Thumb", "Index", "Middle", "Pinkie"): 0.022,
-#     ("Thumb", "Index", "Ring", "Pinkie"): 0.022,
-#     ("Thumb", "Middle", "Ring", "Pinkie"): 0.022,
-#     ("Thumb", "Index", "Middle", "Ring", "Pinkie"): 0.027,
-# }
-
-# #Leap Hand
-# OPPOSABILITY_GROUP_RADII: dict[tuple[str, ...], float] = {
-#     ("Thumb", "Index"): 0.021,
-#     ("Thumb", "Middle"): 0.021,
-#     ("Thumb", "Pinkie"): 0.021,
-#     ("Index", "Middle"): 0.021,
-#     ("Index", "Pinkie"): 0.021,
-#     ("Middle", "Pinkie"): 0.021,
-#     ("Thumb", "Index", "Middle"): 0.032,
-#     ("Thumb", "Index", "Pinkie"): 0.032,
-#     ("Thumb", "Middle", "Pinkie"): 0.032,
-#     ("Index", "Middle", "Pinkie"): 0.032,
-#     ("Thumb", "Index", "Middle", "Pinkie"): 0.043,
-# }
-
-#Allegro Hand
-OPPOSABILITY_GROUP_RADII: dict[tuple[str, ...], float] = {
-    ("Thumb", "Index"): 0.016,
-    ("Thumb", "Middle"): 0.016,
-    ("Thumb", "Pinkie"): 0.016,
-    ("Index", "Middle"): 0.016,
-    ("Index", "Pinkie"): 0.016,
-    ("Middle", "Pinkie"): 0.016,
-    ("Thumb", "Index", "Middle"): 0.024,
-    ("Thumb", "Index", "Pinkie"): 0.024,
-    ("Thumb", "Middle", "Pinkie"): 0.024,
-    ("Index", "Middle", "Pinkie"): 0.024,
-    ("Thumb", "Index", "Middle", "Pinkie"): 0.032,
-}
-
-
-# # Tesollo DG3FM Hand
-# OPPOSABILITY_GROUP_RADII: dict[tuple[str, ...], float] = {
-#     ("Thumb", "Index"): 0.015,
-#     ("Thumb", "Pinkie"): 0.015,
-#     ("Index", "Pinkie"): 0.015,
-#     ("Thumb", "Index", "Pinkie"): 0.023,
-# }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper utilities
