@@ -92,6 +92,39 @@ def _empty_pose_selection(workspace_transforms: FingerWorkspaceTransforms) -> Fi
     )
 
 
+def _broad_phase_tree(
+    workspace_transforms: FingerWorkspaceTransforms, body_name: str, body_T: np.ndarray,
+    centroid: np.ndarray,
+) -> cKDTree:
+    """
+    cKDTree over each swept config's world-frame position of the body's own
+    local mesh centroid, built once per (workspace_transforms, body_name)
+    and cached on workspace_transforms itself -- so repeated
+    finger_pose_selection() calls against the same loaded transforms (e.g.
+    once per sphere location in a batch search) build it only on the first
+    call and reuse it for every call after.
+
+    Centered on the mesh's own centroid rather than the raw body-transform
+    origin (body_T[:, :3, 3]) because the two can be far apart -- e.g.
+    measured ~0.17m for the Leap Hand thumb fingertip mesh vs ~0.04m from
+    its own centroid, a >4x tighter reach bound (see finger_pose_selection's
+    docstring), which directly tightens how aggressively the broad phase
+    can prune.
+    """
+    cache = getattr(workspace_transforms, "_broad_phase_cache", None)
+    if cache is None:
+        cache = {}
+        workspace_transforms._broad_phase_cache = cache
+    tree = cache.get(body_name)
+    if tree is None:
+        R = body_T[:, :3, :3]
+        t = body_T[:, :3, 3]
+        centroid_world = t + np.einsum("nij,j->ni", R, centroid)
+        tree = cKDTree(centroid_world)
+        cache[body_name] = tree
+    return tree
+
+
 def finger_pose_selection(
     finger: FingerSet,
     body_idx: int,
@@ -114,6 +147,21 @@ def finger_pose_selection(
     no longer comes back empty just because no candidate happened to
     satisfy every threshold simultaneously among otherwise-valid contacts.
     See the module docstring for the full rationale.
+
+    Before doing that exact per-pose check, a broad phase first prunes the
+    swept configs with a KD-tree over each config's world-frame body-mesh
+    centroid position (see _broad_phase_tree()): a pose can only pass the
+    +/- 5% cutoff if that centroid lies within radius*1.05 + reach of the
+    sphere center, where reach is the farthest any point of the body's own
+    mesh sits from its own centroid (reverse triangle inequality). That's a
+    necessary, not sufficient, condition, so the broad phase can only ever
+    shrink the candidate set to a superset of the true answer -- the
+    narrow-phase computation below still runs unchanged and exact on
+    whatever survives, so this changes nothing about which poses get
+    returned, only how many the expensive part has to look at. Centroid
+    (rather than the raw body-transform origin) matters here: measured
+    ~0.17m reach from the transform origin vs ~0.04m from the mesh's own
+    centroid for the Leap Hand thumb fingertip, a >4x tighter bound.
 
     Args:
         finger:               FingerSet the body belongs to.
@@ -140,8 +188,20 @@ def finger_pose_selection(
     tree = cKDTree(body_pts)
 
     body_T = workspace_transforms.body_transforms[lnk.body_name]   # (n_configs, 4, 4)
-    R = body_T[:, :3, :3]
-    t = body_T[:, :3, 3]
+
+    # ---- Broad phase (exact prefilter, see docstring above) ----
+    centroid = body_pts.mean(axis=0)
+    reach = float(np.max(np.linalg.norm(body_pts - centroid, axis=1)))
+    broad_tree = _broad_phase_tree(workspace_transforms, lnk.body_name, body_T, centroid)
+    candidate_idx = np.asarray(
+        broad_tree.query_ball_point(sphere_center, r=radius * 1.05 + reach),
+        dtype=np.int64,
+    )
+    if len(candidate_idx) == 0:
+        return _empty_pose_selection(workspace_transforms)
+
+    R = body_T[candidate_idx, :3, :3]
+    t = body_T[candidate_idx, :3, 3]
 
     # sphere_center_body[i] = R[i]' @ (sphere_center - t[i])
     diff = sphere_center[None, :] - t                         # (n, 3)
@@ -149,35 +209,38 @@ def finger_pose_selection(
 
     distances, closest_point_ids = tree.query(sphere_center_body, k=1)
 
-    # ---- Distance cutoff: contact point must actually lie on the sphere
-    # surface (+/- 5%) -- the one hard filter kept from the original
-    # pipeline (see module docstring). Without it, a finger whose workspace
-    # doesn't reach anywhere near the sphere would still hand back
-    # "candidates" that are merely the least-bad of a set that never
-    # touches the target at all, which isn't a real contact.
+    # ---- Narrow phase: exact distance cutoff, unchanged from before other
+    # than running over candidate_idx instead of every workspace pose --
+    # contact point must actually lie on the sphere surface (+/- 5%), the
+    # one hard filter kept from the original pipeline (see module
+    # docstring). Without it, a finger whose workspace doesn't reach
+    # anywhere near the sphere would still hand back "candidates" that are
+    # merely the least-bad of a set that never touches the target at all,
+    # which isn't a real contact.
     in_range = (distances <= radius * 1.05) & (distances >= radius * 0.95)
     if not np.any(in_range):
         return _empty_pose_selection(workspace_transforms)
 
-    candidate_ids = np.where(in_range)[0]
-    distance_score = np.abs(distances[candidate_ids] - radius)
+    kept = np.where(in_range)[0]                     # indices into the pruned (candidate_idx) arrays
+    distance_score = np.abs(distances[kept] - radius)
 
-    n_keep = min(n_candidates, len(candidate_ids))
+    n_keep = min(n_candidates, len(kept))
     order = np.argpartition(distance_score, n_keep - 1)[:n_keep]
     order = order[np.argsort(distance_score[order])]   # best (closest) first
-    best = candidate_ids[order]
+    sel = kept[order]                                 # indices into the pruned arrays, best first
+    best = candidate_idx[sel]                         # indices into the full workspace arrays
 
-    print(f"  {n_keep} Finger poses kept (of {len(candidate_ids):,} within contact range, "
-          f"{n_configs:,} total)")
+    print(f"  {n_keep} Finger poses kept (of {len(kept):,} within contact range, "
+          f"{len(candidate_idx):,} broad-phase candidates of {n_configs:,} total)")
 
     return FingerPoseSelectionResult(
         pose_found=True,
         jointspace=workspace_transforms.jointspace[best],
         transforms={name: arr[best] for name, arr in workspace_transforms.body_transforms.items()},
-        distances=distances[best],
-        sharpness=body_sharpness[closest_point_ids[best]],
-        closest_point_ids=closest_point_ids[best],
-        center_body=sphere_center_body[best],
+        distances=distances[sel],
+        sharpness=body_sharpness[closest_point_ids[sel]],
+        closest_point_ids=closest_point_ids[sel],
+        center_body=sphere_center_body[sel],
     )
 
 

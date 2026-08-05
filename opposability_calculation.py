@@ -393,7 +393,7 @@ HAND_CONFIGS: dict[str, dict] = {
         mesh_folder="URDF_Files/ruka_hand/meshes/",
         save_folder="Opposability/ruka_hand",
         home_actuated=None,
-        opposability_groups==[
+        opposability_groups=[
             (("Thumb", "Index"), 123456),
             (("Thumb", "Middle"), 123456),
             (("Thumb", "Ring"), 123456),

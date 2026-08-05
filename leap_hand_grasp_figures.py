@@ -98,7 +98,6 @@ from python import (
     load_finger_workspace_transforms,
     load_model,
     parse_mimic_and_offsets,
-    sample_weighted_without_replacement,
     true_jacobian,
 )
 
@@ -456,7 +455,9 @@ def _find_grasp_poses(
     centroid = grasp_pts.mean(axis=0)
     candidates = [centroid]
     if N_SEARCH_RETRY > 0:
-        candidates.extend(list(sample_weighted_without_replacement(grasp_pts, N_SEARCH_RETRY)))
+        n_retry = min(N_SEARCH_RETRY, len(grasp_pts))
+        retry_idx = np.random.choice(len(grasp_pts), size=n_retry, replace=False)
+        candidates.extend(list(grasp_pts[retry_idx]))
 
     good: list[dict] = []       # candidates with a common basis
     fallback: list[dict] = []   # candidates without one, kept as filler

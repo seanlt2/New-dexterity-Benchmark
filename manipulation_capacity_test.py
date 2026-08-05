@@ -104,7 +104,6 @@ from python import (
     load_finger_workspace_transforms,
     load_model,
     parse_mimic_and_offsets,
-    sample_weighted_without_replacement,
     true_jacobian,
 )
 
@@ -156,12 +155,12 @@ ANGLE_TOLERANCE_DEG = 5.0
 # How many sphere locations in the graspable volume to search. 1 (the
 # default) tests just the volume's centroid, matching this script's
 # original single-pose behavior exactly. >1 additionally samples
-# (N_SPHERE_LOCATIONS - 1) more locations from the graspable volume (via
-# sample_weighted_without_replacement()) and searches every one of them,
-# reusing the same loaded hand/workspace-transform data for all of
-# them -- so the fixed setup cost (parsing the URDF, sampling meshes,
-# loading both fingers' workspace transforms) is paid once, not once per
-# location. Location 0 is always the centroid.
+# (N_SPHERE_LOCATIONS - 1) more locations uniformly at random (without
+# replacement) from the graspable volume's point cloud, and searches every
+# one of them, reusing the same loaded hand/workspace-transform data for
+# all of them -- so the fixed setup cost (parsing the URDF, sampling
+# meshes, loading both fingers' workspace transforms) is paid once, not
+# once per location. Location 0 is always the centroid.
 N_SPHERE_LOCATIONS = 1
 
 # How many of the searched locations (best first, by found_common_basis
@@ -214,7 +213,9 @@ def main() -> None:
         print(f"Testing a single grasp pose at the graspable volume's centroid: "
               f"[{centroid[0]:.4f}, {centroid[1]:.4f}, {centroid[2]:.4f}] m")
     else:
-        extra = sample_weighted_without_replacement(grasp_pts, N_SPHERE_LOCATIONS - 1)
+        n_extra = min(N_SPHERE_LOCATIONS - 1, len(grasp_pts))
+        extra_idx = np.random.choice(len(grasp_pts), size=n_extra, replace=False)
+        extra = grasp_pts[extra_idx]
         sphere_centers = np.vstack([centroid[None, :], extra])
         print(f"Testing {len(sphere_centers)} sphere locations in the graspable volume "
               f"(location 0 = centroid, {len(sphere_centers) - 1} more sampled from it).")
@@ -529,7 +530,13 @@ def _plot_search_summary(
     ax.set_xlabel("m"); ax.set_ylabel("m"); ax.set_zlabel("m")
     ax.set_title(f"Sphere-location search summary — {group_stem.replace('_', '+')} "
                  f"({len(points)} locations)\n(hand shown at home/neutral pose, for context only)")
-    ax.legend(markerscale=5)
+    # loc="best" (the default) searches for the placement that overlaps the
+    # least plotted data -- an O(n) collision check against every artist on
+    # the axes, which becomes extremely expensive with a dense hand mesh or
+    # a large scatter (measured: ~130s of a ~160s figure-render on a 5-point
+    # search summary, all in legend placement, none of it affecting any
+    # saved/computed result). A fixed corner is just as readable here.
+    ax.legend(markerscale=5, loc="upper left")
     _set_axes_equal(ax)
     plt.tight_layout()
     plt.savefig(os.path.join(out_dir, f"{group_stem}_search_summary.png"), dpi=150)
@@ -600,7 +607,13 @@ def _plot_grasp_pose_normals(
 
     ax.set_xlabel("m"); ax.set_ylabel("m"); ax.set_zlabel("m")
     ax.set_title(f"Grasp pose + contact normals — {group_stem.replace('_', '+')}")
-    ax.legend(markerscale=5)
+    # loc="best" (the default) searches for the placement that overlaps the
+    # least plotted data -- an O(n) collision check against every artist on
+    # the axes, which becomes extremely expensive with a dense hand mesh or
+    # a large scatter (measured: ~130s of a ~160s figure-render on a 5-point
+    # search summary, all in legend placement, none of it affecting any
+    # saved/computed result). A fixed corner is just as readable here.
+    ax.legend(markerscale=5, loc="upper left")
     _set_axes_equal(ax)
     plt.tight_layout()
     plt.savefig(os.path.join(out_dir, f"{group_stem}_grasp_pose_normals.png"), dpi=150)
@@ -643,7 +656,13 @@ def _plot_grasp_pose_force_ellipsoids(
     ax.set_xlabel("m"); ax.set_ylabel("m"); ax.set_zlabel("m")
     ax.set_title(f"Force ellipsoids at contact — {group_stem.replace('_', '+')}\n"
                  f"(each normalized to its own largest-magnitude axis, for display only)")
-    ax.legend(markerscale=5)
+    # loc="best" (the default) searches for the placement that overlaps the
+    # least plotted data -- an O(n) collision check against every artist on
+    # the axes, which becomes extremely expensive with a dense hand mesh or
+    # a large scatter (measured: ~130s of a ~160s figure-render on a 5-point
+    # search summary, all in legend placement, none of it affecting any
+    # saved/computed result). A fixed corner is just as readable here.
+    ax.legend(markerscale=5, loc="upper left")
     _set_axes_equal(ax)
     plt.tight_layout()
     plt.savefig(os.path.join(out_dir, f"{group_stem}_force_ellipsoids.png"), dpi=150)
