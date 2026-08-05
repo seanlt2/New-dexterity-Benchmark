@@ -69,6 +69,7 @@ Outputs (relative to project root), all under <SAVE_FOLDER>/manipulation_capacit
 
 from __future__ import annotations
 
+import multiprocessing as mp
 import os
 import sys
 from typing import Optional
@@ -162,6 +163,21 @@ ANGLE_TOLERANCE_DEG = 5.0
 # meshes, loading both fingers' workspace transforms) is paid once, not
 # once per location. Location 0 is always the centroid.
 N_SPHERE_LOCATIONS = 1
+
+# How many worker processes to search sphere locations 1..N_SPHERE_LOCATIONS-1
+# with in parallel (location 0, the centroid, always runs first in the main
+# process -- see main()). 1 disables multiprocessing entirely (useful for
+# debugging). Only consulted when N_SPHERE_LOCATIONS > 1.
+#
+# This machine's 20 logical CPUs are NOT 20 uniform cores: it's a 12th-gen
+# Intel hybrid part (6 Performance cores w/ hyperthreading = 12 threads, + 8
+# Efficiency cores = 8 threads, 14 physical cores total), and it's a laptop
+# chip, so sustained all-core load risks thermal throttling. 10 was chosen
+# (rather than 20) to roughly match the P-core thread count, leave the
+# E-cores/other hyperthread free for the OS and this process's own main
+# thread, and reduce throttling risk -- measure before assuming higher is
+# strictly better on this specific machine.
+N_WORKERS = 10
 
 # How many of the searched locations (best first, by found_common_basis
 # then rank then fraction_sum) get full hand-mesh figures rendered. Only
@@ -294,17 +310,68 @@ def main() -> None:
     # loading) ran once, regardless of how many locations are searched here.
     multi = len(sphere_centers) > 1
     results = []
-    for i, center in enumerate(sphere_centers):
-        if multi:
-            print(f"[{i + 1}/{len(sphere_centers)}] sphere center "
-                  f"[{center[0]:.4f}, {center[1]:.4f}, {center[2]:.4f}] m")
-        else:
-            print("Searching for an opposable grasp of the test sphere...")
+
+    if not multi:
+        print("Searching for an opposable grasp of the test sphere...")
         results.append(_evaluate_sphere_center(
-            center, radius,
+            sphere_centers[0], radius,
             finger1, body1_idx, wt1, finger2, body2_idx, wt2,
             model, data, coupling, actuated_ids_1, actuated_ids_2,
         ))
+    else:
+        # Location 0 (centroid) always runs synchronously here first, for two
+        # reasons: it's needed either way, and -- more importantly -- this
+        # call is what lazily builds and caches each finger's broad-phase
+        # KD-tree (grasp_selection._broad_phase_tree(), ~6s one-time cost per
+        # finger). Doing that BEFORE the worker pool forks means every worker
+        # inherits the already-built trees via copy-on-write; forking first
+        # would make each worker independently rebuild its own copy.
+        print(f"[1/{len(sphere_centers)}] sphere center "
+              f"[{sphere_centers[0][0]:.4f}, {sphere_centers[0][1]:.4f}, {sphere_centers[0][2]:.4f}] m")
+        results.append(_evaluate_sphere_center(
+            sphere_centers[0], radius,
+            finger1, body1_idx, wt1, finger2, body2_idx, wt2,
+            model, data, coupling, actuated_ids_1, actuated_ids_2,
+        ))
+
+        remaining = sphere_centers[1:]
+        if len(remaining) > 0 and N_WORKERS > 1:
+            n_workers = min(N_WORKERS, len(remaining))
+            print(f"Searching remaining {len(remaining)} location(s) across {n_workers} worker process(es)...")
+
+            global _POOL_RADIUS, _POOL_FINGER1, _POOL_BODY1_IDX, _POOL_WT1
+            global _POOL_FINGER2, _POOL_BODY2_IDX, _POOL_WT2, _POOL_MODEL
+            global _POOL_DATA, _POOL_COUPLING, _POOL_ACTUATED_IDS_1, _POOL_ACTUATED_IDS_2
+            _POOL_RADIUS = radius
+            _POOL_FINGER1, _POOL_BODY1_IDX, _POOL_WT1 = finger1, body1_idx, wt1
+            _POOL_FINGER2, _POOL_BODY2_IDX, _POOL_WT2 = finger2, body2_idx, wt2
+            _POOL_MODEL, _POOL_DATA = model, data
+            _POOL_COUPLING = coupling
+            _POOL_ACTUATED_IDS_1, _POOL_ACTUATED_IDS_2 = actuated_ids_1, actuated_ids_2
+
+            with mp.get_context("fork").Pool(
+                processes=n_workers, initializer=_pool_worker_init,
+            ) as pool:
+                # chunksize=1: per-location cost varies enormously (measured
+                # ~11K to ~4M broad-phase candidates depending on location --
+                # a >350x range), so a small chunksize lets a worker that
+                # finishes an easy location immediately pick up the next one,
+                # rather than sitting idle while another worker chews through
+                # a pre-assigned batch that happened to be expensive.
+                for n_done, result in enumerate(
+                    pool.imap_unordered(_pool_worker, remaining, chunksize=1), start=2
+                ):
+                    print(f"[{n_done}/{len(sphere_centers)}] done")
+                    results.append(result)
+        else:
+            for i, center in enumerate(remaining, start=2):
+                print(f"[{i}/{len(sphere_centers)}] sphere center "
+                      f"[{center[0]:.4f}, {center[1]:.4f}, {center[2]:.4f}] m")
+                results.append(_evaluate_sphere_center(
+                    center, radius,
+                    finger1, body1_idx, wt1, finger2, body2_idx, wt2,
+                    model, data, coupling, actuated_ids_1, actuated_ids_2,
+                ))
 
     out_dir = os.path.join(ROOT, SAVE_FOLDER, "manipulation_capacity")
     os.makedirs(out_dir, exist_ok=True)
@@ -350,6 +417,66 @@ def main() -> None:
         loc_stem = f"{group_stem}_loc{i}"
         _save_and_visualize_one(results[i], radius, loc_stem, out_dir, fingers, model, data, mesh_folder, urdf_base)
     print("Done.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Worker-pool search (see N_WORKERS)
+# ─────────────────────────────────────────────────────────────────────────────
+# main() forks N_WORKERS worker processes to search sphere locations
+# 1..N_SPHERE_LOCATIONS-1 in parallel (location 0, the centroid, always runs
+# synchronously in the main process first -- see main()). The big read-only
+# search inputs (model, both fingers' FingerSet/workspace-transform data,
+# etc.) are stashed in these module-level globals rather than passed as
+# per-task arguments: multiprocessing.Pool pickles each task's function and
+# arguments through an internal queue regardless of start method, so passing
+# the ~hundreds-of-MB workspace transforms per task would re-serialize them
+# for every one of the N_SPHERE_LOCATIONS-1 tasks. Setting them as globals
+# before the Pool is created means each forked worker inherits them for free
+# via Linux's copy-on-write fork() semantics instead -- only the small
+# per-task sphere_center (3 floats) actually gets pickled through the queue.
+_POOL_RADIUS: Optional[float] = None
+_POOL_FINGER1 = None
+_POOL_BODY1_IDX: Optional[int] = None
+_POOL_WT1 = None
+_POOL_FINGER2 = None
+_POOL_BODY2_IDX: Optional[int] = None
+_POOL_WT2 = None
+_POOL_MODEL = None
+_POOL_DATA = None
+_POOL_COUPLING = None
+_POOL_ACTUATED_IDS_1: Optional[list[int]] = None
+_POOL_ACTUATED_IDS_2: Optional[list[int]] = None
+
+
+def _pool_worker_init() -> None:
+    """
+    Runs once per worker process at startup. Limits each worker's own BLAS
+    thread pool to 1 -- otherwise every worker's numpy/scipy calls would
+    ALSO try to spawn threads across all cores, oversubscribing this
+    machine's 14 physical cores roughly N_WORKERS-fold on top of the
+    N_WORKERS processes themselves. (threadpoolctl found no controllable
+    BLAS thread pool in this environment when checked, i.e. this is
+    currently a no-op safety net rather than a fix for an observed problem
+    here -- kept in case that ever changes, e.g. a different numpy/BLAS
+    build.)
+    """
+    try:
+        import threadpoolctl
+        threadpoolctl.threadpool_limits(1)
+    except ImportError:
+        pass
+
+
+def _pool_worker(center: np.ndarray) -> dict:
+    """Runs in a forked worker process -- evaluates one sphere center using
+    the shared search inputs stashed in the _POOL_* globals above."""
+    return _evaluate_sphere_center(
+        center, _POOL_RADIUS,
+        _POOL_FINGER1, _POOL_BODY1_IDX, _POOL_WT1,
+        _POOL_FINGER2, _POOL_BODY2_IDX, _POOL_WT2,
+        _POOL_MODEL, _POOL_DATA, _POOL_COUPLING,
+        _POOL_ACTUATED_IDS_1, _POOL_ACTUATED_IDS_2,
+    )
 
 
 def _evaluate_sphere_center(
