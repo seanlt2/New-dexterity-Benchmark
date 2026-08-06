@@ -12,6 +12,9 @@ overlap the palm.
 
 from __future__ import annotations
 
+import multiprocessing as mp
+from typing import Optional
+
 import numpy as np
 from scipy.optimize import linprog
 from scipy.spatial import cKDTree
@@ -31,6 +34,51 @@ def _colon(lo: float, step: float, hi: float) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
+# Parallel per-point opposability test (3+ fingers)
+# ---------------------------------------------------------------------------
+# graspable_volume()'s opposability test for 3+ finger groups (below) has no
+# vectorized formulation, unlike the 2-finger antipodal case (one dot
+# product): it's a hemisphere test answered by solving a small linear
+# program per candidate point. For any group with more than a few thousand
+# surviving candidates this dominates graspable_volume()'s total time by a
+# wide margin, and every point is fully independent (only reads its own row
+# of U, writes its own row of opp), so it's dispatched across a worker pool
+# here instead of a serial `for m in range(M)` loop.
+#
+# U/n_fingers/margin are stashed as plain module globals (not passed via
+# Pool(initargs=...), which would pickle U once per WORKER through the task
+# queue) so that forked worker processes inherit them via Linux's
+# copy-on-write fork() semantics for free -- only each chunk's small
+# (start, end) index range actually gets pickled through the queue.
+_POOL_U: Optional[np.ndarray] = None
+_POOL_N_FINGERS: Optional[int] = None
+_POOL_MARGIN: Optional[float] = None
+
+# Below this many surviving candidates, the fork/IPC overhead of spinning up
+# a worker pool isn't worth it -- just run the loop serially.
+_MIN_PARALLEL_OPPOSABILITY_POINTS = 2000
+
+
+def _opposability_chunk(index_range: tuple[int, int]) -> tuple[int, np.ndarray]:
+    """Runs in a worker process: solve the hemisphere-opposability LP for
+    every point in _POOL_U[start:end], returning (start, that chunk's mask)
+    so the caller can place it back at the right offset in the full array."""
+    start, end = index_range
+    U, n_fingers, margin = _POOL_U, _POOL_N_FINGERS, _POOL_MARGIN
+    c = np.array([0.0, 0.0, 0.0, -1.0])
+    bounds = [(-1, 1), (-1, 1), (-1, 1), (None, None)]
+    opp_chunk = np.zeros(end - start, dtype=bool)
+    for i, m in enumerate(range(start, end)):
+        Um = U[m]
+        A_ub = np.hstack([-Um.T, np.ones((n_fingers, 1))])
+        b_ub = np.zeros(n_fingers)
+        sol = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method="highs")
+        if sol.success:
+            opp_chunk[i] = sol.x[3] <= margin
+    return start, opp_chunk
+
+
+# ---------------------------------------------------------------------------
 # Graspable volume (reach + opposability)
 # ---------------------------------------------------------------------------
 
@@ -40,6 +88,7 @@ def graspable_volume(
     mu: float = 0.5,
     res: float | None = None,
     verbose: bool = True,
+    n_workers: int = 1,
 ) -> np.ndarray:
     """
     Sphere-center positions the hand can both REACH and OPPOSABLY grasp.
@@ -63,6 +112,11 @@ def graspable_volume(
         verbose:           Print candidate counts after each filtering
                            stage, to help see which finger/test is actually
                            doing the filtering.
+        n_workers:         Worker processes for the 3+ finger opposability
+                           test's per-point linear-program solve (see
+                           _opposability_chunk() above). No effect on the
+                           2-finger case, which is already fully vectorized.
+                           1 (the default) runs it serially.
 
     Returns:
         (M, 3) array of sphere-center positions achieving an opposable grasp
@@ -129,15 +183,33 @@ def graspable_volume(
         # hemisphere test per point: is there a v with u_k . v > 0 for all k?
         margin = np.sin(np.arctan(mu))
         opp = np.zeros(M, dtype=bool)
-        c = np.array([0.0, 0.0, 0.0, -1.0])   # maximize t  (x = [v(1:3); t])
-        bounds = [(-1, 1), (-1, 1), (-1, 1), (None, None)]
-        for m in range(M):
-            Um = U[m]                                  # (3, n_fingers)
-            A_ub = np.hstack([-Um.T, np.ones((n_fingers, 1))])
-            b_ub = np.zeros(n_fingers)
-            sol = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method="highs")
-            if sol.success:
-                opp[m] = sol.x[3] <= margin   # t* <= 0 frictionless; margin adds friction
+
+        if n_workers > 1 and M >= _MIN_PARALLEL_OPPOSABILITY_POINTS:
+            global _POOL_U, _POOL_N_FINGERS, _POOL_MARGIN
+            _POOL_U, _POOL_N_FINGERS, _POOL_MARGIN = U, n_fingers, margin
+
+            # ~4 chunks per worker so a worker that finishes its share early
+            # can pick up more via imap_unordered, rather than everyone
+            # waiting on however many points landed in the single slowest
+            # of exactly n_workers equal-sized chunks.
+            n_chunks = max(1, min(M, n_workers * 4))
+            edges = np.linspace(0, M, n_chunks + 1, dtype=int)
+            chunks = [(int(edges[i]), int(edges[i + 1]))
+                      for i in range(n_chunks) if edges[i] < edges[i + 1]]
+
+            with mp.get_context("fork").Pool(processes=min(n_workers, len(chunks))) as pool:
+                for start, opp_chunk in pool.imap_unordered(_opposability_chunk, chunks):
+                    opp[start:start + len(opp_chunk)] = opp_chunk
+        else:
+            c = np.array([0.0, 0.0, 0.0, -1.0])   # maximize t  (x = [v(1:3); t])
+            bounds = [(-1, 1), (-1, 1), (-1, 1), (None, None)]
+            for m in range(M):
+                Um = U[m]                                  # (3, n_fingers)
+                A_ub = np.hstack([-Um.T, np.ones((n_fingers, 1))])
+                b_ub = np.zeros(n_fingers)
+                sol = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method="highs")
+                if sol.success:
+                    opp[m] = sol.x[3] <= margin   # t* <= 0 frictionless; margin adds friction
 
     if verbose:
         print(f"    after opposability (mu={mu:.3g}): {int(opp.sum()):,} candidates")
@@ -223,6 +295,7 @@ def compute_opposable_grasp_volume(
     mu: float = 0.5,
     res: float | None = None,
     verbose: bool = True,
+    n_workers: int = 1,
 ) -> np.ndarray:
     """
     Sphere-center positions where the selected fingers can form an opposable
@@ -239,9 +312,11 @@ def compute_opposable_grasp_volume(
         mu:                 Friction coefficient (default 0.5).
         res:                Candidate grid spacing (see graspable_volume()).
         verbose:            Print candidate counts after each filtering stage.
+        n_workers:          See graspable_volume() -- only matters for 3+
+                            finger groups.
 
     Returns:
         (M, 3) array of valid sphere-center grasp positions.
     """
-    candidates = graspable_volume(finger_workspaces, r, mu, res, verbose=verbose)
+    candidates = graspable_volume(finger_workspaces, r, mu, res, verbose=verbose, n_workers=n_workers)
     return filter_palm_collisions(candidates, palm_mesh, r, verbose=verbose)

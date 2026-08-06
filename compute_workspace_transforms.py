@@ -70,6 +70,7 @@ from opposability_calculation import (
     N_MESH_SAMPLES,
     N_PTS,
     HOME_ACTUATED,
+    N_WORKERS,
 )
 
 
@@ -128,7 +129,7 @@ def main() -> None:
 
         print(f"Sweeping {finger_name}'s joint-space transforms...")
         t0 = time.time()
-        result = finger_workspace_transforms(finger, act_space, coupling, model, data, q_home)
+        result = finger_workspace_transforms(finger, act_space, coupling, model, data, q_home, n_workers=N_WORKERS)
         elapsed = time.time() - t0
         print(f"  {result.jointspace.shape[0]:,} poses in {elapsed:.1f}s")
 

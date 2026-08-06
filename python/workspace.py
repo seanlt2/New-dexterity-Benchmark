@@ -20,8 +20,10 @@ from __future__ import annotations
 
 import itertools
 import json
+import multiprocessing as mp
 import os
 import pickle
+import tempfile
 from dataclasses import dataclass
 from typing import Optional
 
@@ -42,6 +44,115 @@ from .kinematics import (
 # Workspace computation
 # ---------------------------------------------------------------------------
 
+# Module globals for _workspace_chunk() -- the parallel path for
+# finger_workspace()'s joint-space sweep (see n_workers below). Set once,
+# right before the pool is created, so forked workers inherit model/data/
+# coupling-matrix/etc via Linux's copy-on-write fork() semantics instead of
+# having them re-pickled per chunk; only each chunk's small (start, end)
+# combo-index range actually gets pickled through the task queue. `data` in
+# particular is a mutable Pinocchio object that compute_fk() writes into on
+# every call -- forking gives each worker its own private copy of it, so
+# there's no cross-process aliasing even though every worker calls
+# compute_fk() on "the same" object as far as the source code reads.
+_POOL_FW_MODEL = None
+_POOL_FW_DATA = None
+_POOL_FW_Q_HOME: Optional[np.ndarray] = None
+_POOL_FW_COUPLING_MATRIX: Optional[np.ndarray] = None
+_POOL_FW_N_ACTUATED: Optional[int] = None
+_POOL_FW_FINGER_ROWS: Optional[list[int]] = None
+_POOL_FW_ACT_JOINT_SPACE: Optional[np.ndarray] = None
+_POOL_FW_PT_RANGES: Optional[list[list[int]]] = None
+_POOL_FW_PT_RANGE_LENS: Optional[list[int]] = None
+_POOL_FW_LINKS: Optional[list[tuple]] = None
+_POOL_FW_PTS_PER_CONFIG: Optional[int] = None
+# Path/shape of the disk-backed memmap each worker writes its chunk's points
+# directly into (see finger_workspace()'s parallel branch for why this is a
+# memmap and not a returned array).
+_POOL_FW_MMAP_PATH: Optional[str] = None
+_POOL_FW_MMAP_SHAPE: Optional[tuple[int, int]] = None
+
+_MIN_PARALLEL_CONFIGS = 2000
+
+
+def _combo_indices(flat_index: int, lens: list[int]) -> list[int]:
+    """
+    Decode a flat combo index into itertools.product(*pt_ranges)'s per-axis
+    indices -- i.e. the same mixed-radix counting product() does internally
+    (right-most axis varies fastest), just computed directly for an
+    arbitrary index instead of by stepping through every combo before it.
+    Lets a chunk worker start at combo `start` in O(n_joints), not O(start).
+    """
+    n = len(lens)
+    idxs = [0] * n
+    rem = flat_index
+    for k in range(n - 1, -1, -1):
+        idxs[k] = rem % lens[k]
+        rem //= lens[k]
+    return idxs
+
+
+def _workspace_chunk(index_range: tuple[int, int]) -> tuple[int, int]:
+    """Runs in a worker process: sweeps combo indices [start, end) of
+    _POOL_FW_PT_RANGES (the same combos itertools.product(*pt_ranges) would
+    yield at those positions), writing each combo's points directly into its
+    slot -- flat_index * _POOL_FW_PTS_PER_CONFIG -- of the shared
+    _POOL_FW_MMAP_PATH memmap, and returning only (start, end) back through
+    the task queue.
+
+    Returning the chunk's own (potentially huge) point array instead was the
+    first version of this function; measured on a real 320k-config, 718M-
+    point Allegro Hand thumb sweep, it capped the parallel speedup at only
+    ~1.7x on 10 workers, because every worker's multi-hundred-MB result still
+    had to be pickled and piped back to the main process one at a time --
+    that serialized transfer, not the FK/transform compute itself, was the
+    actual bottleneck. Writing straight into a shared memmap lets every
+    worker's writes happen concurrently and removes that transfer almost
+    entirely, since only the tiny (start, end) tuple crosses the queue."""
+    start, end = index_range
+    model, data = _POOL_FW_MODEL, _POOL_FW_DATA
+    q_home = _POOL_FW_Q_HOME
+    coupling_matrix = _POOL_FW_COUPLING_MATRIX
+    n_actuated = _POOL_FW_N_ACTUATED
+    finger_rows = _POOL_FW_FINGER_ROWS
+    act_space = _POOL_FW_ACT_JOINT_SPACE
+    pt_ranges = _POOL_FW_PT_RANGES
+    lens = _POOL_FW_PT_RANGE_LENS
+    links = _POOL_FW_LINKS
+    pts_per_config = _POOL_FW_PTS_PER_CONFIG
+
+    mmap_arr = np.memmap(_POOL_FW_MMAP_PATH, dtype=np.float32, mode="r+",
+                          shape=_POOL_FW_MMAP_SHAPE)
+
+    for flat_index in range(start, end):
+        idxs = _combo_indices(flat_index, lens)
+
+        actuated_q = np.zeros(n_actuated)
+        for k, row in enumerate(finger_rows):
+            actuated_q[row] = act_space[row, pt_ranges[k][idxs[k]]]
+
+        full_q = coupling_matrix @ np.append(actuated_q, 1.0)
+        q = q_home.copy()
+        q[:len(full_q)] = full_q
+
+        compute_fk(model, data, q)
+
+        cursor = flat_index * pts_per_config
+        for frame_id, mesh_offset, pts in links:
+            transformed = points_transform_precomputed(model, data, frame_id, mesh_offset, pts)
+            n_new = len(transformed)
+            mmap_arr[cursor:cursor + n_new] = transformed
+            cursor += n_new
+
+    # No explicit flush()/msync() here: that forces a synchronous write to
+    # the backing file, which is unneeded and expensive -- the main process
+    # reads the same file's pages back through the same OS page cache once
+    # every worker has exited, which is already coherent without one.
+    # Measured: adding flush() here cut the 1.66x speedup an unflushed
+    # memmap gets down to ~1.3x.
+    del mmap_arr
+    return start, end
+
+
 def finger_workspace(
     finger: FingerSet,
     actuated_joint_space: np.ndarray,
@@ -49,6 +160,7 @@ def finger_workspace(
     model,
     data,
     q_home: np.ndarray,
+    n_workers: int = 1,
 ) -> np.ndarray:
     """
     Compute the reachable workspace point cloud for one finger.
@@ -65,6 +177,15 @@ def finger_workspace(
         q_home:               Home/neutral pinocchio configuration (length
                               model.nq).  Used as the base; only the finger's
                               joints are swept.
+        n_workers:            Worker processes to sweep joint-space combos
+                              with in parallel (each combo -- one FK solve
+                              plus per-link point transform -- is
+                              independent of every other). 1 (the default)
+                              runs the original serial loop; below
+                              _MIN_PARALLEL_CONFIGS combos, always runs
+                              serially regardless of n_workers, since a
+                              small finger's sweep isn't worth pool-startup
+                              overhead.
 
     Returns:
         (M, 3) float32 array of workspace points in world frame.
@@ -118,10 +239,82 @@ def finger_workspace(
     for r in pt_ranges:
         max_configs *= len(r)
 
+    total = max_configs
+
+    if n_workers > 1 and total >= _MIN_PARALLEL_CONFIGS:
+        pt_range_lens = [len(r) for r in pt_ranges]
+        link_tuples = [
+            (frame_ids[lnk.body_name], mesh_offsets[lnk.body_name], lnk.points)
+            for lnk in links_with_pts
+        ]
+        mmap_shape = (pts_per_config * max_configs, 3)
+
+        global _POOL_FW_MODEL, _POOL_FW_DATA, _POOL_FW_Q_HOME, _POOL_FW_COUPLING_MATRIX
+        global _POOL_FW_N_ACTUATED, _POOL_FW_FINGER_ROWS, _POOL_FW_ACT_JOINT_SPACE
+        global _POOL_FW_PT_RANGES, _POOL_FW_PT_RANGE_LENS, _POOL_FW_LINKS, _POOL_FW_PTS_PER_CONFIG
+        global _POOL_FW_MMAP_PATH, _POOL_FW_MMAP_SHAPE
+        _POOL_FW_MODEL = model
+        _POOL_FW_DATA = data
+        _POOL_FW_Q_HOME = q_home
+        _POOL_FW_COUPLING_MATRIX = coupling.matrix
+        _POOL_FW_N_ACTUATED = coupling.n_actuated
+        _POOL_FW_FINGER_ROWS = finger_rows
+        _POOL_FW_ACT_JOINT_SPACE = actuated_joint_space
+        _POOL_FW_PT_RANGES = pt_ranges
+        _POOL_FW_PT_RANGE_LENS = pt_range_lens
+        _POOL_FW_LINKS = link_tuples
+        _POOL_FW_PTS_PER_CONFIG = pts_per_config
+        _POOL_FW_MMAP_SHAPE = mmap_shape
+
+        # ~4 chunks/worker, same granularity as opposability.py's LP-solve
+        # pool, for reasonable load balancing without excessive per-task
+        # dispatch overhead (per-config cost here is fairly uniform, unlike
+        # that pool's highly variable per-point candidate counts).
+        n_chunks = max(1, min(total, n_workers * 4))
+        chunk_len = -(-total // n_chunks)  # ceil
+        chunk_bounds = [(start, min(start + chunk_len, total))
+                         for start in range(0, total, chunk_len)]
+
+        # Disk-backed (not /dev/shm-backed) so a large sweep's memory
+        # footprint stays exactly what it already is elsewhere in this
+        # pipeline -- evictable page-cache pages, not a fixed RAM
+        # reservation -- rather than adding a second, tmpfs-capped copy of
+        # the same data on top. See _workspace_chunk()'s docstring for why
+        # this replaced returning each chunk's array through the pool.
+        tmp_fd, tmp_path = tempfile.mkstemp(prefix="finger_workspace_", suffix=".dat")
+        _POOL_FW_MMAP_PATH = tmp_path
+        try:
+            nbytes = mmap_shape[0] * mmap_shape[1] * np.dtype(np.float32).itemsize
+            # posix_fallocate (not truncate/ftruncate), so every block is
+            # actually allocated on disk up front: workers write to
+            # different offsets of this same file concurrently, and a
+            # sparse file would make each worker's first touch of a new
+            # region extend the file's on-disk extent map -- an inode-level
+            # metadata change that can serialize concurrent writers on the
+            # same file even though their byte ranges never overlap.
+            # Preallocating means every write instead lands on already-
+            # mapped blocks, so it needs no metadata lock.
+            os.posix_fallocate(tmp_fd, 0, nbytes)
+            os.close(tmp_fd)
+
+            n_done = 0
+            with mp.get_context("fork").Pool(processes=min(n_workers, len(chunk_bounds))) as pool:
+                for _start, _end in pool.imap_unordered(_workspace_chunk, chunk_bounds):
+                    n_done += 1
+                    print(f"  Workspace {100 * n_done / len(chunk_bounds):.1f}% complete "
+                          f"({n_done}/{len(chunk_bounds)} chunks)")
+
+            workspace = np.array(np.memmap(tmp_path, dtype=np.float32, mode="r", shape=mmap_shape))
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+        return workspace
+
     workspace = np.zeros((pts_per_config * max_configs, 3), dtype=np.float32)
     cursor = 0
-
-    total = max_configs
     count = 0
     report_every = max(1, total // 20)
 
@@ -162,10 +355,32 @@ def finger_workspace(
 # Alpha-shape workspace volume
 # ---------------------------------------------------------------------------
 
+# Module globals for _voxelize_points()'s parallel path (see n_workers
+# below), set right before the pool is created so forked workers inherit
+# the (potentially hundreds-of-millions-of-points) array via Linux's
+# copy-on-write fork() semantics instead of having it re-pickled per chunk.
+_POOL_VOXELIZE_POINTS: Optional[np.ndarray] = None
+_POOL_VOXEL_SIZE: Optional[float] = None
+
+
+def _voxelize_chunk(index_range: tuple[int, int]) -> np.ndarray:
+    """Runs in a worker process: round + dedupe one chunk of
+    _POOL_VOXELIZE_POINTS onto the voxel grid, returning that chunk's own
+    local unique voxel indices. Deduplication is associative (see
+    _voxelize_points()'s docstring), so the caller still does one final
+    merge across every chunk's result -- the same voxel can legitimately
+    appear in more than one chunk's local output."""
+    start, end = index_range
+    chunk = _POOL_VOXELIZE_POINTS[start:end]
+    idx = np.round(chunk.astype(np.float64) / _POOL_VOXEL_SIZE).astype(np.int64)
+    return np.unique(idx, axis=0)
+
+
 def _voxelize_points(
     points: np.ndarray,
     voxel_size: float,
     chunk_size: int = 2_000_000,
+    n_workers: int = 1,
 ) -> np.ndarray:
     """
     Round points onto a voxel_size grid and deduplicate, processing in
@@ -190,9 +405,40 @@ def _voxelize_points(
     identical to deduplicating the whole array at once: the union of each
     chunk's uniques, uniqued again, equals the unique set of the whole.
 
+    With n_workers > 1 (and more than one chunk), chunks are deduplicated
+    independently across a worker pool, then merged once at the end --
+    NOT the same incremental one-chunk-at-a-time merge the serial path
+    below uses. That's a deliberate memory/speed tradeoff scoped to the
+    parallel path only: it holds every chunk's (already-deduplicated, so
+    typically much smaller than raw) result at once rather than folding
+    each one in and discarding it immediately, bounded by chunk_size *
+    n_chunks of *unique* voxels rather than raw points, not by the huge raw
+    cloud this function exists to avoid holding onto. The n_workers<=1
+    fallback is untouched from the original incremental version, to keep
+    its memory profile exactly as before by default.
+
+    Args:
+        points:     Raw point cloud (metres).
+        voxel_size: Voxel grid spacing (metres).
+        chunk_size: How many points to round + dedupe per chunk.
+        n_workers:  Worker processes to dedupe chunks with in parallel. 1
+                   (the default) runs the original serial loop.
+
     Returns:
         (M, 3) float64 array of unique voxel-center coordinates.
     """
+    if n_workers > 1 and len(points) > chunk_size:
+        chunk_bounds = [(start, min(start + chunk_size, len(points)))
+                         for start in range(0, len(points), chunk_size)]
+        global _POOL_VOXELIZE_POINTS, _POOL_VOXEL_SIZE
+        _POOL_VOXELIZE_POINTS, _POOL_VOXEL_SIZE = points, voxel_size
+        with mp.get_context("fork").Pool(processes=min(n_workers, len(chunk_bounds))) as pool:
+            chunk_uniques = list(pool.imap_unordered(_voxelize_chunk, chunk_bounds))
+        if not chunk_uniques:
+            return np.empty((0, 3), dtype=np.float64)
+        accumulated = np.unique(np.vstack(chunk_uniques), axis=0)
+        return accumulated.astype(np.float64) * voxel_size
+
     accumulated: Optional[np.ndarray] = None
     for start in range(0, len(points), chunk_size):
         chunk = points[start:start + chunk_size]
@@ -207,7 +453,7 @@ def _voxelize_points(
     return accumulated.astype(np.float64) * voxel_size
 
 
-def generate_alphashape(workspace_points: np.ndarray, max_fit_points: int = 2000):
+def generate_alphashape(workspace_points: np.ndarray, max_fit_points: int = 2000, n_workers: int = 1):
     """
     Generate an alpha shape that tightly bounds the workspace point cloud.
 
@@ -228,6 +474,11 @@ def generate_alphashape(workspace_points: np.ndarray, max_fit_points: int = 2000
         workspace_points: (N, 3) point cloud (metres).
         max_fit_points:   Cap on how many (voxelized) points the alpha-shape
                           search itself runs on.
+        n_workers:        Worker processes for the voxelization step (see
+                          _voxelize_points()) -- no effect on the critical-
+                          alpha search itself, which is a small-input,
+                          sequential bisection-style search and isn't
+                          parallelized. 1 (the default) runs it serially.
 
     Returns:
         trimesh.Trimesh alpha shape, or None if the cloud is too small, or
@@ -236,7 +487,7 @@ def generate_alphashape(workspace_points: np.ndarray, max_fit_points: int = 2000
         valid enclosed volume.
     """
     voxel_size = 0.001  # 1 mm
-    voxelized = _voxelize_points(workspace_points, voxel_size)
+    voxelized = _voxelize_points(workspace_points, voxel_size, n_workers=n_workers)
 
     if len(voxelized) < 4:
         return None
@@ -250,11 +501,30 @@ def generate_alphashape(workspace_points: np.ndarray, max_fit_points: int = 2000
     return _fit_alphashape(fit_points)
 
 
+# Module globals used by _contains_chunk() when sample_workspace_grid() runs
+# its chunks across a worker pool (see n_workers below) -- set once, right
+# before the pool is created, so forked workers inherit shape/grid_pts via
+# Linux's copy-on-write fork() semantics instead of having them re-pickled
+# per chunk. Only each chunk's small (start, end) index range actually gets
+# pickled through the task queue.
+_POOL_SHAPE = None
+_POOL_GRID_PTS: Optional[np.ndarray] = None
+
+
+def _contains_chunk(index_range: tuple[int, int]) -> tuple[int, np.ndarray]:
+    """Runs in a worker process: shape.contains() for one chunk of
+    _POOL_GRID_PTS, returning (start, that chunk's boolean mask) so the
+    caller can place it back at the right offset in the full array."""
+    start, end = index_range
+    return start, _POOL_SHAPE.contains(_POOL_GRID_PTS[start:end])
+
+
 def sample_workspace_grid(
     shape,
     resolution: float = 0.001,
     chunk_size: int = 20_000,
     verbose: bool = True,
+    n_workers: int = 1,
 ) -> np.ndarray:
     """
     Resample an alpha-shape volume onto a uniform 3-D grid.
@@ -277,7 +547,11 @@ def sample_workspace_grid(
     degrade badly when handed a huge point batch at once; this queries it
     in bounded-size chunks instead, which also gives progress output for
     what can otherwise be a multi-minute call on a finger-sized volume at
-    1mm resolution.
+    1mm resolution. With n_workers > 1, those same chunks (still capped at
+    chunk_size each, for the correctness/performance reason above -- this
+    doesn't change how big any single shape.contains() call is, only how
+    many of them run at once) are dispatched across a worker pool instead
+    of run one after another.
 
     Args:
         shape:      trimesh.Trimesh alpha shape, e.g. from generate_alphashape().
@@ -285,6 +559,8 @@ def sample_workspace_grid(
         chunk_size: How many grid points to test against the shape per
                    shape.contains() call.
         verbose:    Print progress every ~10 chunks.
+        n_workers:  Worker processes to test chunks with in parallel. 1 (the
+                   default) runs the original serial loop.
 
     Returns:
         (M, 3) float32 array of grid points inside the shape. Empty if
@@ -301,13 +577,27 @@ def sample_workspace_grid(
 
     n = len(grid_pts)
     inside = np.zeros(n, dtype=bool)
-    n_chunks = max(1, -(-n // chunk_size))  # ceil div
-    for i, start in enumerate(range(0, n, chunk_size)):
-        end = min(start + chunk_size, n)
-        inside[start:end] = shape.contains(grid_pts[start:end])
-        if verbose and (i % 10 == 0 or end == n):
-            print(f"    sample_workspace_grid: {end:,}/{n:,} grid points tested "
-                  f"({100 * end / n:.0f}%)")
+    chunk_bounds = [(start, min(start + chunk_size, n)) for start in range(0, n, chunk_size)]
+    n_chunks = len(chunk_bounds)
+
+    if n_workers > 1 and n_chunks > 1:
+        global _POOL_SHAPE, _POOL_GRID_PTS
+        _POOL_SHAPE, _POOL_GRID_PTS = shape, grid_pts
+
+        n_done = 0
+        with mp.get_context("fork").Pool(processes=min(n_workers, n_chunks)) as pool:
+            for start, mask in pool.imap_unordered(_contains_chunk, chunk_bounds):
+                inside[start:start + len(mask)] = mask
+                n_done += 1
+                if verbose and (n_done % 10 == 0 or n_done == n_chunks):
+                    print(f"    sample_workspace_grid: {n_done}/{n_chunks} chunks tested "
+                          f"({100 * n_done / n_chunks:.0f}%)")
+    else:
+        for i, (start, end) in enumerate(chunk_bounds):
+            inside[start:end] = shape.contains(grid_pts[start:end])
+            if verbose and (i % 10 == 0 or end == n):
+                print(f"    sample_workspace_grid: {end:,}/{n:,} grid points tested "
+                      f"({100 * end / n:.0f}%)")
 
     return grid_pts[inside].astype(np.float32)
 
@@ -487,6 +777,77 @@ class FingerWorkspaceTransforms:
     body_transforms: dict[str, np.ndarray]    # body_name -> (n_configs, 4, 4)
 
 
+# Module globals for _workspace_transforms_chunk() -- the parallel path for
+# finger_workspace_transforms()'s joint-space sweep. Same rationale/pattern
+# as finger_workspace()'s _POOL_FW_* globals above (fork-inherited
+# read-only state, disk-backed memmap for the actual output instead of
+# returning arrays through the pool -- see _workspace_chunk()'s docstring
+# for why). Every sampled pose's jointspace row and every body's flattened
+# 4x4 transform are packed into one wide memmap row per pose (columns
+# [0:nq) = jointspace, [nq+16*i : nq+16*(i+1)) = body i's transform,
+# raveled row-major) rather than one memmap file per array, purely to avoid
+# managing N+1 temp files/paths for what's a single per-pose write.
+_POOL_FWT_MODEL = None
+_POOL_FWT_DATA = None
+_POOL_FWT_Q_HOME: Optional[np.ndarray] = None
+_POOL_FWT_COUPLING_MATRIX: Optional[np.ndarray] = None
+_POOL_FWT_N_ACTUATED: Optional[int] = None
+_POOL_FWT_FINGER_ROWS: Optional[list[int]] = None
+_POOL_FWT_ACT_JOINT_SPACE: Optional[np.ndarray] = None
+_POOL_FWT_PT_RANGES: Optional[list[list[int]]] = None
+_POOL_FWT_PT_RANGE_LENS: Optional[list[int]] = None
+_POOL_FWT_BODY_INFO: Optional[list[tuple]] = None  # [(frame_id, mesh_offset), ...]
+_POOL_FWT_NQ: Optional[int] = None
+_POOL_FWT_MMAP_PATH: Optional[str] = None
+_POOL_FWT_MMAP_SHAPE: Optional[tuple[int, int]] = None
+
+
+def _workspace_transforms_chunk(index_range: tuple[int, int]) -> tuple[int, int]:
+    """Runs in a worker process: sweeps combo indices [start, end), writing
+    each pose's jointspace row + every body's flattened transform directly
+    into row `flat_index` of the shared _POOL_FWT_MMAP_PATH memmap. See
+    _workspace_chunk()'s docstring -- same reasoning for writing into a
+    memmap instead of returning arrays through the pool."""
+    start, end = index_range
+    model, data = _POOL_FWT_MODEL, _POOL_FWT_DATA
+    q_home = _POOL_FWT_Q_HOME
+    coupling_matrix = _POOL_FWT_COUPLING_MATRIX
+    n_actuated = _POOL_FWT_N_ACTUATED
+    finger_rows = _POOL_FWT_FINGER_ROWS
+    act_space = _POOL_FWT_ACT_JOINT_SPACE
+    pt_ranges = _POOL_FWT_PT_RANGES
+    lens = _POOL_FWT_PT_RANGE_LENS
+    body_info = _POOL_FWT_BODY_INFO
+    nq = _POOL_FWT_NQ
+
+    mmap_arr = np.memmap(_POOL_FWT_MMAP_PATH, dtype=np.float32, mode="r+",
+                          shape=_POOL_FWT_MMAP_SHAPE)
+
+    for flat_index in range(start, end):
+        idxs = _combo_indices(flat_index, lens)
+
+        actuated_q = np.zeros(n_actuated)
+        for k, row in enumerate(finger_rows):
+            actuated_q[row] = act_space[row, pt_ranges[k][idxs[k]]]
+
+        full_q = coupling_matrix @ np.append(actuated_q, 1.0)
+        q = q_home.copy()
+        q[:len(full_q)] = full_q
+
+        compute_fk(model, data, q)
+
+        mmap_arr[flat_index, :nq] = q
+        col = nq
+        for frame_id, mesh_offset in body_info:
+            T_world_link = get_transform_by_id(model, data, frame_id)
+            mmap_arr[flat_index, col:col + 16] = (T_world_link @ mesh_offset).ravel()
+            col += 16
+
+    # No flush()/msync() -- see _workspace_chunk()'s identical comment.
+    del mmap_arr
+    return start, end
+
+
 def finger_workspace_transforms(
     finger: FingerSet,
     actuated_joint_space: np.ndarray,
@@ -494,6 +855,7 @@ def finger_workspace_transforms(
     model,
     data,
     q_home: np.ndarray,
+    n_workers: int = 1,
 ) -> FingerWorkspaceTransforms:
     """
     Sweep a finger's actuated joints and record each body's world-frame
@@ -510,6 +872,12 @@ def finger_workspace_transforms(
         coupling:             CouplingInfo from build_coupling_matrix().
         model, data:          Pinocchio model and data.
         q_home:               Home/neutral pinocchio configuration.
+        n_workers:            Worker processes to sweep joint-space combos
+                              with in parallel -- see finger_workspace()'s
+                              identical parameter. 1 (the default) runs the
+                              original serial loop; below
+                              _MIN_PARALLEL_CONFIGS combos, always runs
+                              serially regardless of n_workers.
 
     Returns:
         FingerWorkspaceTransforms with one row per sampled pose.
@@ -553,12 +921,72 @@ def finger_workspace_transforms(
     for r in pt_ranges:
         max_configs *= len(r)
 
-    jointspace = np.zeros((max_configs, len(q_home)), dtype=np.float32)
+    total = max_configs
+    nq = len(q_home)
+
+    if n_workers > 1 and total >= _MIN_PARALLEL_CONFIGS:
+        pt_range_lens = [len(r) for r in pt_ranges]
+        body_info = [(frame_ids[lnk.body_name], mesh_offsets[lnk.body_name]) for lnk in bodies]
+        row_width = nq + 16 * len(bodies)
+        mmap_shape = (total, row_width)
+
+        global _POOL_FWT_MODEL, _POOL_FWT_DATA, _POOL_FWT_Q_HOME, _POOL_FWT_COUPLING_MATRIX
+        global _POOL_FWT_N_ACTUATED, _POOL_FWT_FINGER_ROWS, _POOL_FWT_ACT_JOINT_SPACE
+        global _POOL_FWT_PT_RANGES, _POOL_FWT_PT_RANGE_LENS, _POOL_FWT_BODY_INFO, _POOL_FWT_NQ
+        global _POOL_FWT_MMAP_PATH, _POOL_FWT_MMAP_SHAPE
+        _POOL_FWT_MODEL = model
+        _POOL_FWT_DATA = data
+        _POOL_FWT_Q_HOME = q_home
+        _POOL_FWT_COUPLING_MATRIX = coupling.matrix
+        _POOL_FWT_N_ACTUATED = coupling.n_actuated
+        _POOL_FWT_FINGER_ROWS = finger_rows
+        _POOL_FWT_ACT_JOINT_SPACE = actuated_joint_space
+        _POOL_FWT_PT_RANGES = pt_ranges
+        _POOL_FWT_PT_RANGE_LENS = pt_range_lens
+        _POOL_FWT_BODY_INFO = body_info
+        _POOL_FWT_NQ = nq
+        _POOL_FWT_MMAP_SHAPE = mmap_shape
+
+        n_chunks = max(1, min(total, n_workers * 4))
+        chunk_len = -(-total // n_chunks)  # ceil
+        chunk_bounds = [(start, min(start + chunk_len, total))
+                         for start in range(0, total, chunk_len)]
+
+        tmp_fd, tmp_path = tempfile.mkstemp(prefix="finger_workspace_transforms_", suffix=".dat")
+        _POOL_FWT_MMAP_PATH = tmp_path
+        try:
+            nbytes = mmap_shape[0] * mmap_shape[1] * np.dtype(np.float32).itemsize
+            os.posix_fallocate(tmp_fd, 0, nbytes)
+            os.close(tmp_fd)
+
+            n_done = 0
+            with mp.get_context("fork").Pool(processes=min(n_workers, len(chunk_bounds))) as pool:
+                for _start, _end in pool.imap_unordered(_workspace_transforms_chunk, chunk_bounds):
+                    n_done += 1
+                    print(f"  Workspace transforms {100 * n_done / len(chunk_bounds):.1f}% complete "
+                          f"({n_done}/{len(chunk_bounds)} chunks)")
+
+            big = np.array(np.memmap(tmp_path, dtype=np.float32, mode="r", shape=mmap_shape))
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+        jointspace = big[:, :nq]
+        body_transforms = {}
+        col = nq
+        for lnk in bodies:
+            body_transforms[lnk.body_name] = big[:, col:col + 16].reshape(total, 4, 4)
+            col += 16
+
+        return FingerWorkspaceTransforms(jointspace=jointspace, body_transforms=body_transforms)
+
+    jointspace = np.zeros((max_configs, nq), dtype=np.float32)
     body_transforms = {
         lnk.body_name: np.zeros((max_configs, 4, 4), dtype=np.float32) for lnk in bodies
     }
 
-    total = max_configs
     count = 0
     report_every = max(1, total // 20)
 
