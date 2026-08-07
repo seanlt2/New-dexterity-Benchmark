@@ -13,12 +13,17 @@ hand there, not here.
 
 Figures (all saved under <SAVE_FOLDER>/pipeline_figures/):
     01_home_workspaces.png
-        The hand at its home pose, with the two fingers' workspace alpha
-        shapes (from opposability_calculation.py) rendered translucent.
-        Pose-independent -- generated once, not per grasp pose.
-    02_home_workspaces_graspable_volume.png
-        Same as 01, plus the two fingers' graspable-volume alpha shape.
-        Also generated once.
+        The hand at its home pose, with EVERY active finger's own workspace
+        alpha shape (from opposability_calculation.py) rendered translucent
+        -- not just the MANIPULATION_GROUP pair. Pose-independent --
+        generated once, not per grasp pose.
+    02_home_graspable_volume_<group>.png  (one per entry in
+        GRASPABLE_VOLUME_GROUPS, e.g. Thumb_Index, Index_Middle)
+        The hand at home pose, with that group's two fingers' workspace
+        alpha shapes plus their graspable-volume alpha shape, all
+        translucent. Generalizes the old hardcoded "02" figure (which only
+        ever covered MANIPULATION_GROUP) to any set of groups. Also
+        generated once each, not per grasp pose.
     pose_<i>/03_grasp_pose_graspable_volume.png  (i = 0..N_GRASP_SETS-1)
         The hand at grasp pose i (found by searching the graspable volume,
         same as manipulation_capacity_test.py), holding the target sphere,
@@ -134,6 +139,23 @@ from manipulation_capacity_test import (
 MANIPULATION_GROUP: tuple[str, str] = ("Thumb", "Index")
 FINGER_SELECTED_BODY: dict[str, int] = {"Thumb": -1, "Index": -1}
 
+# Which finger-pair groups to render a "home pose + graspable volume" figure
+# (02) for. MANIPULATION_GROUP is included automatically -- no need to list
+# it here too -- since figures 3-6's grasp-pose search already depends on
+# it being loaded regardless.
+EXTRA_GRASPABLE_VOLUME_GROUPS: list[tuple[str, str]] = [("Index", "Middle")]
+
+# Which graspable_volume subfolder (under SAVE_FOLDER) figure 02 (and the
+# figure 3-6 grasp-pose search, which also needs a graspable-volume alpha
+# shape) reads from. "graspable_volume_2" here is a freshly-recomputed
+# leap_hand run from a graspable_volume-vs-graspable_volume_2 comparison --
+# very likely more correct than the older plain "graspable_volume" folder,
+# which predates a documented mesh-offset-rotation bugfix in
+# kinematics.py's _mesh_offset_matrix() (see that function's docstring).
+# Point this back to "graspable_volume" if that's not the comparison you
+# want rendered.
+GRASPABLE_VOLUME_DIR_NAME = "graspable_volume_2"
+
 N_TARGET_POSES = 50
 ANGLE_TOLERANCE_DEG = 5.0
 
@@ -165,8 +187,20 @@ AXIS_COLORS = ["red", "green", "blue"]   # principal axes 0/1/2, both force
                                           # ellipsoids (fig 5) and common basis (fig 6)
 
 WORKSPACE_ALPHA = 0.15
-GRASPABLE_VOLUME_COLOR = "green"
-GRASPABLE_VOLUME_ALPHA = 0.15
+# "purple" -- deliberately outside COLORS' palette (blue/red/green/cyan/gray)
+# so the graspable-volume shape never collides with a finger's own color in
+# figure 2's now-generalized-to-any-group rendering. "green" used to be safe
+# only because MANIPULATION_GROUP was always Thumb+Index (neither green);
+# once figure 2 could render arbitrary groups, a Middle-containing group
+# made the graspable volume literally the same color as Middle's own
+# workspace shape, indistinguishable in the render.
+GRASPABLE_VOLUME_COLOR = "purple"
+# Higher than WORKSPACE_ALPHA (0.15) so the graspable volume -- typically
+# much smaller than, and sitting entirely inside, the two workspace shapes
+# it's drawn alongside in figure 2 -- stands out rather than getting lost
+# in them (see _render_alpha_shape()'s edges= docstring for the same issue
+# from another angle).
+GRASPABLE_VOLUME_ALPHA = 0.4
 SPHERE_ALPHA_SOLID = 0.6        # figure 3
 SPHERE_ALPHA_TRANSLUCENT = 0.35  # figures 4-6 ("now translucent")
 CONE_HEIGHT = 0.02               # display-only friction-cone edge length (m)
@@ -247,29 +281,51 @@ def main() -> None:
     else:
         q_home = q_neutral.copy()
 
-    # ── 3. Load per-finger workspace alpha shapes ─────────────────────────────
+    # ── 3. Load every active finger's own workspace alpha shape (figure 1) ───
     wvol_dir = os.path.join(ROOT, SAVE_FOLDER, "workspace_volumes")
-    alpha1 = _load_pickle(os.path.join(wvol_dir, f"Finger_{FINGER_ID[finger1_name]}_wkspace_alpha.pkl"))
-    alpha2 = _load_pickle(os.path.join(wvol_dir, f"Finger_{FINGER_ID[finger2_name]}_wkspace_alpha.pkl"))
-    if alpha1 is None or alpha2 is None:
+    all_finger_alphas: dict[str, object] = {}
+    for fname, fs in fingers.items():
+        if fname not in FINGER_ID or fs.is_empty():
+            continue
+        alpha = _load_pickle(os.path.join(wvol_dir, f"Finger_{FINGER_ID[fname]}_wkspace_alpha.pkl"))
+        if alpha is None:
+            print(f"  Warning: no workspace alpha shape for {fname} in {wvol_dir} -- skipping it in figure 1.")
+            continue
+        all_finger_alphas[fname] = alpha
+    if finger1_name not in all_finger_alphas or finger2_name not in all_finger_alphas:
         sys.exit(
             f"Missing {finger1_name}/{finger2_name} workspace alpha shape(s) in {wvol_dir}\n"
             f"Run opposability_calculation.py first (with the same active hand config)."
         )
-    print(f"Loaded {finger1_name}/{finger2_name} workspace alpha shapes.")
+    print(f"Loaded workspace alpha shapes for: {', '.join(all_finger_alphas)}.")
+    alpha1 = all_finger_alphas[finger1_name]
+    alpha2 = all_finger_alphas[finger2_name]
 
-    # ── 4. Load the graspable volume's alpha shape + point cloud ─────────────
-    grasp_dir = os.path.join(ROOT, SAVE_FOLDER, "graspable_volume")
-    grasp_alpha = _load_pickle(os.path.join(grasp_dir, f"graspable_volume_{group_stem}_alpha.pkl"))
-    grasp_pts_path = os.path.join(grasp_dir, f"graspable_volume_{group_stem}_pts.npy")
-    if grasp_alpha is None or not os.path.exists(grasp_pts_path):
-        sys.exit(
-            f"Missing graspable-volume alpha shape or points for {group_stem} in {grasp_dir}\n"
-            f"Run opposability_calculation.py first (with {MANIPULATION_GROUP} included in its "
-            f"OPPOSABILITY_GROUPS)."
-        )
-    grasp_pts = np.load(grasp_pts_path)
-    print(f"Loaded {group_stem} graspable-volume alpha shape and {len(grasp_pts):,} points.")
+    # ── 4. Load each requested group's graspable-volume alpha shape + point
+    #      cloud (figure 2, one per group; MANIPULATION_GROUP's is also what
+    #      figures 3-6's grasp-pose search below uses) ─────────────────────
+    grasp_dir = os.path.join(ROOT, SAVE_FOLDER, GRASPABLE_VOLUME_DIR_NAME)
+    graspable_volume_groups = [MANIPULATION_GROUP] + [
+        g for g in EXTRA_GRASPABLE_VOLUME_GROUPS if g != MANIPULATION_GROUP
+    ]
+
+    def _load_group_graspable_volume(group: tuple[str, ...]) -> tuple[object, np.ndarray]:
+        stem = "_".join(group)
+        alpha = _load_pickle(os.path.join(grasp_dir, f"graspable_volume_{stem}_alpha.pkl"))
+        pts_path = os.path.join(grasp_dir, f"graspable_volume_{stem}_pts.npy")
+        if alpha is None or not os.path.exists(pts_path):
+            sys.exit(
+                f"Missing graspable-volume alpha shape or points for {stem} in {grasp_dir}\n"
+                f"Run opposability_calculation.py first (with {group} included in its "
+                f"OPPOSABILITY_GROUPS), saving into {GRASPABLE_VOLUME_DIR_NAME}."
+            )
+        pts = np.load(pts_path)
+        print(f"Loaded {stem} graspable-volume alpha shape and {len(pts):,} points "
+              f"(from {GRASPABLE_VOLUME_DIR_NAME}).")
+        return alpha, pts
+
+    group_graspable_volumes = {g: _load_group_graspable_volume(g) for g in graspable_volume_groups}
+    grasp_alpha, grasp_pts = group_graspable_volumes[MANIPULATION_GROUP]
 
     # ── 5. Load precomputed per-body workspace transforms ────────────────────
     transforms_dir = os.path.join(ROOT, SAVE_FOLDER, "Workspace_Transforms")
@@ -334,8 +390,11 @@ def main() -> None:
     compute_fk(model, data, q_home)
     home_meshes = _collect_hand_meshes(fingers, model, data, mesh_folder, urdf_base)
 
-    _figure_1(home_meshes, alpha1, alpha2, finger1_name, finger2_name, out_dir)
-    _figure_2(home_meshes, alpha1, alpha2, grasp_alpha, finger1_name, finger2_name, out_dir)
+    _figure_1(home_meshes, all_finger_alphas, out_dir)
+    for group in graspable_volume_groups:
+        g_alpha, _ = group_graspable_volumes[group]
+        _figure_2(home_meshes, all_finger_alphas[group[0]], all_finger_alphas[group[1]],
+                 g_alpha, group[0], group[1], out_dir)
 
     # ── Figures 3-6: one set per grasp pose, in its own pose_<i> subfolder ───
     for i, result in enumerate(results):
@@ -501,19 +560,35 @@ def _find_grasp_poses(
 # Shared drawing helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _render_hand_meshes(ax, hand_meshes: dict) -> None:
+def _render_hand_meshes(ax, hand_meshes: dict, colors: dict[str, str] = PIPELINE_COLORS) -> None:
     """
     Same as manipulation_capacity_test.py's _render_hand_meshes(), but
-    colored via this script's local PIPELINE_COLORS (Middle/Pinkie greyed
-    out) instead of the shared COLORS -- kept local so it doesn't change
-    that script's own figures.
+    colored via `colors` (defaults to this script's local PIPELINE_COLORS,
+    Middle/Pinkie greyed out) instead of unconditionally using the shared
+    COLORS -- kept local so it doesn't change that script's own figures.
+    Pass a different mapping (e.g. plain COLORS, or _group_highlight_colors())
+    for figures that involve more than just MANIPULATION_GROUP's two fingers.
     """
     for fname, mesh in hand_meshes.items():
         v = mesh.vertices
-        color = PIPELINE_COLORS.get(fname, "black")
+        color = colors.get(fname, "black")
         ax.plot_trisurf(v[:, 0], v[:, 1], v[:, 2], triangles=mesh.faces,
                         color=color, alpha=0.6, edgecolor="none")
         ax.plot([], [], color=color, marker="s", linestyle="None", markersize=8, label=fname)
+
+
+def _group_highlight_colors(group: tuple[str, ...]) -> dict[str, str]:
+    """
+    Color mapping for a figure focused on one finger group: fingers IN the
+    group keep their real COLORS entry (visually distinct from each other
+    already -- Thumb blue, Index red, Middle green, Pinkie cyan -- no need
+    for PIPELINE_COLORS' Thumb+Index-specific yellow override), every other
+    finger (and the palm) is greyed out, same visual intent as
+    PIPELINE_COLORS but generalized to an arbitrary group instead of always
+    Thumb+Index.
+    """
+    return {fname: (COLORS.get(fname, "black") if fname in group else "gray")
+            for fname in COLORS}
 
 
 def _finish_axes(ax) -> None:
@@ -525,13 +600,30 @@ def _finish_axes(ax) -> None:
     _set_axes_equal(ax)
 
 
-def _render_alpha_shape(ax, shape, color: str, alpha: float, label: str) -> None:
-    """Render a trimesh.Trimesh alpha shape (workspace/graspable volume), translucent."""
+def _render_alpha_shape(ax, shape, color: str, alpha: float, label: str, edges: bool = False) -> None:
+    """
+    Render a trimesh.Trimesh alpha shape (workspace/graspable volume),
+    translucent.
+
+    edges=True draws each triangle's own edges in `color` too (not just the
+    translucent fill) -- matplotlib's 3D transparency doesn't correctly
+    depth-composite SEPARATE Poly3DCollections against each other (each
+    plot_trisurf call is its own collection), so a small shape like a
+    graspable volume sitting entirely inside two much bigger, similarly
+    translucent finger-workspace shapes can end up visually invisible
+    despite being drawn last/"on top" in call order -- confirmed on real
+    Leap Hand Thumb+Index/Index+Middle data, where the graspable-volume fill
+    alone didn't show up at all against the workspace shapes. Drawing its
+    edges too makes its boundary visible regardless of that blending
+    limitation, the same reason _draw_sphere() elsewhere in this file draws
+    both a translucent fill AND a wireframe.
+    """
     if shape is None:
         return
     v = shape.vertices
     ax.plot_trisurf(v[:, 0], v[:, 1], v[:, 2], triangles=shape.faces,
-                    color=color, alpha=alpha, edgecolor="none")
+                    color=color, alpha=alpha, edgecolor=(color if edges else "none"),
+                    linewidth=0.3 if edges else 0)
     # plot_trisurf's Poly3DCollection doesn't produce a usable legend handle
     # on its own -- add an invisible proxy artist instead (same pattern as
     # manipulation_capacity_test.py's _draw_sphere()/_render_hand_meshes()).
@@ -580,16 +672,19 @@ def _draw_friction_cone(
 # Figures
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _figure_1(home_meshes, alpha1, alpha2, name1, name2, out_dir) -> None:
+def _figure_1(home_meshes, all_finger_alphas: dict[str, object], out_dir) -> None:
+    """Hand at home pose + EVERY active finger's own workspace alpha shape,
+    each in its own real COLORS color (not PIPELINE_COLORS' greying, since
+    every finger is equally relevant here, not just MANIPULATION_GROUP's)."""
     fig = plt.figure(figsize=(8, 6))
     ax = fig.add_subplot(111, projection="3d")
 
-    _render_hand_meshes(ax, home_meshes)
-    _render_alpha_shape(ax, alpha1, PIPELINE_COLORS.get(name1, "blue"), WORKSPACE_ALPHA, f"{name1} workspace")
-    _render_alpha_shape(ax, alpha2, PIPELINE_COLORS.get(name2, "red"), WORKSPACE_ALPHA, f"{name2} workspace")
+    _render_hand_meshes(ax, home_meshes, colors=COLORS)
+    for fname, alpha in all_finger_alphas.items():
+        _render_alpha_shape(ax, alpha, COLORS.get(fname, "black"), WORKSPACE_ALPHA, f"{fname} workspace")
 
     ax.set_xlabel("m"); ax.set_ylabel("m"); ax.set_zlabel("m")
-    ax.set_title(f"1. Home pose + {name1}/{name2} workspace volumes")
+    ax.set_title(f"1. Home pose + workspace volumes ({', '.join(all_finger_alphas)})")
     _finish_axes(ax)
     plt.tight_layout()
     plt.savefig(os.path.join(out_dir, "01_home_workspaces.png"), dpi=150)
@@ -597,20 +692,31 @@ def _figure_1(home_meshes, alpha1, alpha2, name1, name2, out_dir) -> None:
 
 
 def _figure_2(home_meshes, alpha1, alpha2, grasp_alpha, name1, name2, out_dir) -> None:
+    """Hand at home pose + one group's two workspace alpha shapes + that
+    group's graspable-volume alpha shape. Generalizes the original
+    MANIPULATION_GROUP-only figure to any (name1, name2) group -- every
+    other finger is greyed out via _group_highlight_colors() so the group
+    under examination stays visually clear regardless of hand size."""
     fig = plt.figure(figsize=(8, 6))
     ax = fig.add_subplot(111, projection="3d")
 
-    _render_hand_meshes(ax, home_meshes)
-    _render_alpha_shape(ax, alpha1, PIPELINE_COLORS.get(name1, "blue"), WORKSPACE_ALPHA, f"{name1} workspace")
-    _render_alpha_shape(ax, alpha2, PIPELINE_COLORS.get(name2, "red"), WORKSPACE_ALPHA, f"{name2} workspace")
+    group_colors = _group_highlight_colors((name1, name2))
+    _render_hand_meshes(ax, home_meshes, colors=group_colors)
+    _render_alpha_shape(ax, alpha1, group_colors.get(name1, "blue"), WORKSPACE_ALPHA, f"{name1} workspace")
+    _render_alpha_shape(ax, alpha2, group_colors.get(name2, "red"), WORKSPACE_ALPHA, f"{name2} workspace")
+    # edges=True: the graspable volume is typically much smaller than, and
+    # sits entirely inside, the two workspace shapes above -- see
+    # _render_alpha_shape()'s docstring for why its fill alone can end up
+    # invisible against them without also drawing its edges.
     _render_alpha_shape(ax, grasp_alpha, GRASPABLE_VOLUME_COLOR, GRASPABLE_VOLUME_ALPHA,
-                        f"{name1}+{name2} graspable volume")
+                        f"{name1}+{name2} graspable volume", edges=True)
 
     ax.set_xlabel("m"); ax.set_ylabel("m"); ax.set_zlabel("m")
-    ax.set_title(f"2. Home pose + workspace volumes + graspable volume")
+    ax.set_title(f"2. Home pose + {name1}/{name2} workspace volumes + graspable volume\n"
+                 f"(from {GRASPABLE_VOLUME_DIR_NAME})")
     _finish_axes(ax)
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "02_home_workspaces_graspable_volume.png"), dpi=150)
+    plt.savefig(os.path.join(out_dir, f"02_home_graspable_volume_{name1}_{name2}.png"), dpi=150)
     plt.show()
 
 

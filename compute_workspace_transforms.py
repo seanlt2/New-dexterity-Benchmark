@@ -60,7 +60,9 @@ from python import (
 )
 
 # Reuse the active hand config directly from opposability_calculation.py --
-# change the hand there, and this script follows automatically.
+# change the hand there, and this script follows automatically. N_PTS is
+# NOT reused here (unlike opposability_calculation.py's own sweep) -- see
+# DEGREES_PER_STEP below.
 from opposability_calculation import (
     FINGER_BODIES,
     URDF_FILE,
@@ -68,10 +70,18 @@ from opposability_calculation import (
     MESH_SCALE,
     SAVE_FOLDER,
     N_MESH_SAMPLES,
-    N_PTS,
     HOME_ACTUATED,
     N_WORKERS,
 )
+
+# Angular resolution (degrees) each actuated joint is swept at, e.g. a joint
+# spanning -30 to 90 deg sweeps -30, -29, -28, ..., 89, 90 (121 points).
+# Unlike opposability_calculation.py's N_PTS (a fixed POINT COUNT shared by
+# every joint regardless of its own range, so a 30 deg joint and a 180 deg
+# joint get sampled equally coarsely/finely in point terms but very
+# differently in angular terms), this fixes the ANGULAR spacing instead, so
+# every joint gets the same physical sweep density regardless of its range.
+DEGREES_PER_STEP = 2.0
 
 
 def main() -> None:
@@ -109,13 +119,37 @@ def main() -> None:
         q_home = q_neutral.copy()
     compute_fk(model, data, q_home)
 
-    # ── Actuated joint space grid (identical to opposability_calculation.py) ──
+    # ── Actuated joint space grid: each joint swept at its OWN
+    #      DEGREES_PER_STEP resolution, not a shared point count ───────────
     n_act = coupling.n_actuated
-    act_space = np.zeros((n_act, N_PTS))
-    for i, full_id in enumerate(coupling.actuated_joint_ids):
+    joint_limits = []            # (lo, hi) radians, per actuated joint
+    n_pts_per_joint = []         # that joint's own point count at 1 deg/step
+    for full_id in coupling.actuated_joint_ids:
         lo = float(model.lowerPositionLimit[full_id])
         hi = float(model.upperPositionLimit[full_id])
-        act_space[i, :] = np.linspace(lo, hi, N_PTS)
+        joint_limits.append((lo, hi))
+        range_deg = np.degrees(hi - lo)
+        n_pts_per_joint.append(max(1, int(round(range_deg / DEGREES_PER_STEP)) + 1))
+
+    # finger_workspace_transforms() (like finger_workspace()) expects one
+    # shared column count across every joint row -- its halving-scheme grid
+    # subsamples by COLUMN POSITION, not angle -- so every row is built to
+    # the same width: wide enough for the joint with the LARGEST range to
+    # get exactly DEGREES_PER_STEP resolution. A joint with a smaller range
+    # fills its own true 1-deg-spaced sweep in the columns it needs, then
+    # holds at its own upper limit for any remaining columns -- those extra
+    # combos just re-evaluate that one joint at its max angle alongside
+    # whatever the other (still-sweeping) joints are doing, not wrong, just
+    # a little redundant for that joint's own axis.
+    N_pts = max(n_pts_per_joint)
+    act_space = np.zeros((n_act, N_pts))
+    for i, (lo, hi) in enumerate(joint_limits):
+        n_pts_i = n_pts_per_joint[i]
+        act_space[i, :n_pts_i] = np.linspace(lo, hi, n_pts_i)
+        act_space[i, n_pts_i:] = hi
+    print(f"  Actuated joint-space grid: {DEGREES_PER_STEP:g} deg/step, "
+          f"{N_pts} columns wide (widest joint's range); "
+          f"per-joint point counts: {n_pts_per_joint}")
 
     out_dir = os.path.join(ROOT, SAVE_FOLDER, "Workspace_Transforms")
 

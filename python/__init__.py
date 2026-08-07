@@ -28,6 +28,8 @@ manipulation_capacity  manipulation_capacity_region(),
 dynamics         compute_mass_matrix(), compute_coriolis_matrix(),
                  mass_and_coriolis_from_urdf() -- not used anywhere yet, see
                  its module docstring.
+force_polytope   force_polytope_vertices() -- not used anywhere yet, see its
+                 module docstring.
 """
 
 from .urdf_parser import (
@@ -117,6 +119,7 @@ from .dynamics import (
     compute_coriolis_matrix,
     mass_and_coriolis_from_urdf,
 )
+from .force_polytope import force_polytope_vertices
 
 __all__ = [
     # urdf_parser
@@ -161,4 +164,6 @@ __all__ = [
     "sample_weighted_without_replacement",
     # dynamics
     "compute_mass_matrix", "compute_coriolis_matrix", "mass_and_coriolis_from_urdf",
+    # force_polytope
+    "force_polytope_vertices",
 ]
