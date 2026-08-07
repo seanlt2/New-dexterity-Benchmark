@@ -50,16 +50,24 @@ Outputs (relative to project root), all under <SAVE_FOLDER>/manipulation_capacit
     <Finger1>_<Finger2>_grasp_pose_normals.png / _force_ellipsoids.png
         (N_SPHERE_LOCATIONS == 1 only) see the module summary above.
     <Finger1>_<Finger2>_search_summary.npz
-        (N_SPHERE_LOCATIONS > 1 only) points, grasp_found, found_common_basis,
-        rank, fraction_sum, min_fraction (lowest per-axis common-basis
-        balance score, 0 if no basis found) -- one row per searched sphere
-        location.
+        (N_SPHERE_LOCATIONS > 1 only) points, grasp_found, force_closure_found,
+        found_common_basis, status, rank, fraction_sum, min_fraction (lowest
+        per-axis common-basis balance score, 0 if no basis found), q -- one
+        row per searched sphere location. status is one of "no_grasp" (no
+        candidate pose reached/opposed the sphere at all), "no_force_closure"
+        (candidate poses existed but none passed force closure),
+        "no_common_basis" (force closure passed for at least one pose, but
+        none of those also had a common force-ellipsoid basis), or "success"
+        (both). q is that location's chosen jointspace vector, but only when
+        status == "success" -- every other row is NaN, since a pose that
+        never passed force closure/common-basis isn't a validated grasp
+        configuration worth persisting.
     <Finger1>_<Finger2>_search_summary.png
         (N_SPHERE_LOCATIONS > 1 only) all searched locations, colored by
-        rank, alongside the hand at its home/neutral pose for spatial
-        context (not any particular grasp pose -- the searched locations
-        span many different candidate poses, so there's no single "the"
-        pose to show here the way the per-location figures do).
+        status (see above), alongside the hand at its home/neutral pose for
+        spatial context (not any particular grasp pose -- the searched
+        locations span many different candidate poses, so there's no single
+        "the" pose to show here the way the per-location figures do).
     <Finger1>_<Finger2>_loc<i>_pose.npz / _grasp_pose_normals.png / _force_ellipsoids.png
         (N_SPHERE_LOCATIONS > 1 only) same detail as the N==1 case above,
         for each of the best N_VISUALIZE locations (by found_common_basis,
@@ -155,14 +163,27 @@ ANGLE_TOLERANCE_DEG = 5.0
 
 # How many sphere locations in the graspable volume to search. 1 (the
 # default) tests just the volume's centroid, matching this script's
-# original single-pose behavior exactly. >1 additionally samples
-# (N_SPHERE_LOCATIONS - 1) more locations uniformly at random (without
-# replacement) from the graspable volume's point cloud, and searches every
-# one of them, reusing the same loaded hand/workspace-transform data for
-# all of them -- so the fixed setup cost (parsing the URDF, sampling
-# meshes, loading both fingers' workspace transforms) is paid once, not
-# once per location. Location 0 is always the centroid.
+# original single-pose behavior exactly. >1 additionally selects
+# (N_SPHERE_LOCATIONS - 1) more locations, spread evenly across the
+# graspable volume's point cloud via farthest-point sampling (see
+# _farthest_point_sample()), and searches every one of them, reusing the
+# same loaded hand/workspace-transform data for all of them -- so the fixed
+# setup cost (parsing the URDF, sampling meshes, loading both fingers'
+# workspace transforms) is paid once, not once per location. Location 0 is
+# the graspable-volume point closest to the centroid.
+#
+# Only consulted when POINTS_PER_SPHERE_LOCATION (below) is None.
 N_SPHERE_LOCATIONS = 1
+
+# Alternative to a fixed N_SPHERE_LOCATIONS: pick the number of sphere
+# locations relative to the size of the loaded graspable volume instead --
+# e.g. 100 means roughly 1 location per 100 graspable-volume points,
+# regardless of how big that volume's point cloud actually is (which varies
+# hugely across finger groups and hands, hence "roughly": there's no reason
+# a fixed location count would represent a 500-point graspable volume and a
+# 500,000-point one equally well). None (the default) disables this and
+# falls back to the fixed N_SPHERE_LOCATIONS above.
+POINTS_PER_SPHERE_LOCATION: Optional[int] = None
 
 # How many worker processes to search sphere locations 1..N_SPHERE_LOCATIONS-1
 # with in parallel (location 0, the centroid, always runs first in the main
@@ -196,6 +217,49 @@ VIS_VECTOR_LENGTH = 0.02
 
 AXIS_COLORS = ["red", "green", "blue"]   # force-ellipsoid principal axes 0/1/2
 
+# Colors for _plot_search_summary()'s per-location status scatter -- see
+# _evaluate_sphere_center()'s docstring for what each status means. Ordered
+# worst to best so the legend reads as a severity gradient.
+STATUS_COLORS = {
+    "no_grasp": "lightgray",
+    "no_force_closure": "red",
+    "no_common_basis": "orange",
+    "success": "green",
+}
+
+
+def _farthest_point_sample(points: np.ndarray, n: int, seed_point: np.ndarray) -> np.ndarray:
+    """
+    Greedy farthest-point sampling: returns indices of `n` points from
+    `points`, spread as evenly as possible across the point cloud (each pick
+    maximizes the minimum distance to every point already selected).
+
+    Used instead of uniform random sampling (the previous approach) because
+    random sampling doesn't guarantee spatial coverage -- with a modest
+    sample count relative to a large cloud, chance clustering can leave
+    whole regions of the graspable volume unsampled while other regions get
+    several nearby picks. Deterministic (no RNG): the first pick is always
+    the point nearest `seed_point`, so re-running with the same inputs
+    reproduces the same locations.
+
+    O(n * len(points)) via an incrementally maintained per-point "distance
+    to nearest selected point so far" array -- standard for this algorithm,
+    and fast enough here since graspable-volume point clouds run at most in
+    the low hundreds of thousands.
+    """
+    n = min(n, len(points))
+    selected = np.empty(n, dtype=np.int64)
+
+    selected[0] = int(np.argmin(np.linalg.norm(points - seed_point, axis=1)))
+    min_dist = np.linalg.norm(points - points[selected[0]], axis=1)
+
+    for i in range(1, n):
+        selected[i] = int(np.argmax(min_dist))
+        new_dist = np.linalg.norm(points - points[selected[i]], axis=1)
+        min_dist = np.minimum(min_dist, new_dist)
+
+    return selected
+
 
 def main() -> None:
     if len(MANIPULATION_GROUP) != 2:
@@ -223,18 +287,24 @@ def main() -> None:
     if len(grasp_pts) == 0:
         sys.exit("Graspable volume is empty -- nothing to test.")
 
+    if POINTS_PER_SPHERE_LOCATION is not None:
+        n_locations = max(1, len(grasp_pts) // POINTS_PER_SPHERE_LOCATION)
+        print(f"POINTS_PER_SPHERE_LOCATION={POINTS_PER_SPHERE_LOCATION}: "
+              f"{len(grasp_pts):,} points -> {n_locations} location(s).")
+    else:
+        n_locations = N_SPHERE_LOCATIONS
+
     centroid = grasp_pts.mean(axis=0)
-    if N_SPHERE_LOCATIONS <= 1:
+    if n_locations <= 1:
         sphere_centers = centroid[None, :]
         print(f"Testing a single grasp pose at the graspable volume's centroid: "
               f"[{centroid[0]:.4f}, {centroid[1]:.4f}, {centroid[2]:.4f}] m")
     else:
-        n_extra = min(N_SPHERE_LOCATIONS - 1, len(grasp_pts))
-        extra_idx = np.random.choice(len(grasp_pts), size=n_extra, replace=False)
-        extra = grasp_pts[extra_idx]
-        sphere_centers = np.vstack([centroid[None, :], extra])
-        print(f"Testing {len(sphere_centers)} sphere locations in the graspable volume "
-              f"(location 0 = centroid, {len(sphere_centers) - 1} more sampled from it).")
+        idx = _farthest_point_sample(grasp_pts, n_locations, seed_point=centroid)
+        sphere_centers = grasp_pts[idx]
+        print(f"Testing {len(sphere_centers)} sphere locations spread evenly across the "
+              f"graspable volume via farthest-point sampling "
+              f"(location 0 = the point closest to the centroid).")
 
     radius = OPPOSABILITY_GROUP_RADII.get(MANIPULATION_GROUP, GRASP_SPHERE_RADIUS)
     print(f"Using sphere radius r={radius:g} m (same as this group's graspable volume).")
@@ -378,27 +448,52 @@ def main() -> None:
 
     if not multi:
         result = results[0]
-        if not result["grasp_found"]:
-            sys.exit("No opposable grasp found at the graspable volume's centroid.")
+        if not result["found_common_basis"]:
+            if result["status"] == "no_grasp":
+                sys.exit("No opposable grasp found at the graspable volume's centroid: no "
+                         "candidate pose reached/opposed the sphere at all.")
+            elif result["status"] == "no_force_closure":
+                sys.exit("Found candidate grasp poses at the centroid, but none satisfied "
+                         "force closure.")
+            else:
+                sys.exit("Found force-closure poses at the centroid, but none had a common "
+                         "force-ellipsoid basis.")
         _save_and_visualize_one(result, radius, group_stem, out_dir, fingers, model, data, mesh_folder, urdf_base)
         print("Done.")
         return
 
     # ── 5. Batch summary + save ────────────────────────────────────────────
-    n_found = sum(r["grasp_found"] for r in results)
-    n_closure = sum(r["found_common_basis"] for r in results)
-    print(f"\n{n_found}/{len(results)} locations found an opposable grasp; "
-          f"{n_closure}/{len(results)} achieved force closure + a common basis.")
+    n_success = sum(r["status"] == "success" for r in results)
+    n_no_basis = sum(r["status"] == "no_common_basis" for r in results)
+    n_no_closure = sum(r["status"] == "no_force_closure" for r in results)
+    n_no_grasp = sum(r["status"] == "no_grasp" for r in results)
+    print(f"\n{len(results)} location(s) searched:")
+    print(f"  {n_success} succeeded (force closure + common force basis)")
+    print(f"  {n_no_basis} found force closure but no common force basis")
+    print(f"  {n_no_closure} found candidate poses but none satisfied force closure")
+    print(f"  {n_no_grasp} found no candidate grasp pose at all")
+
+    # q is only meaningful for a validated ("success") pose -- see
+    # _evaluate_sphere_center()'s docstring -- so every other row is left as
+    # NaN rather than persisting a fallback pose that never passed force
+    # closure/common-basis as if it were one.
+    q_matrix = np.full((len(results), model.nq), np.nan)
+    for i, r in enumerate(results):
+        if r["status"] == "success":
+            q_matrix[i] = r["q"]
 
     summary_path = os.path.join(out_dir, f"{group_stem}_search_summary.npz")
     np.savez(
         summary_path,
         points=np.array([r["sphere_center"] for r in results]),
         grasp_found=np.array([r["grasp_found"] for r in results]),
+        force_closure_found=np.array([r["force_closure_found"] for r in results]),
         found_common_basis=np.array([r["found_common_basis"] for r in results]),
+        status=np.array([r["status"] for r in results]),
         rank=np.array([r["rank"] for r in results]),
         fraction_sum=np.array([r["fraction_sum"] for r in results]),
         min_fraction=np.array([r["min_fraction"] for r in results]),
+        q=q_matrix,
     )
     print(f"Saved {summary_path}")
     _plot_search_summary(results, out_dir, group_stem, fingers, model, data, mesh_folder, urdf_base)
@@ -496,9 +591,32 @@ def _evaluate_sphere_center(
     unlike that function, keeping the winning pose's full contact detail
     (transforms, force ellipsoids) instead of just a summary.
 
-    Returns a dict with grasp_found/found_common_basis/rank/fraction_sum
-    always present, and q/T1/T2/fe1/fe2 present (non-None) whenever
-    grasp_found is True.
+    Returns a dict with grasp_found/force_closure_found/found_common_basis/
+    status/rank/fraction_sum always present, and q/T1/T2/fe1/fe2 present
+    (non-None) whenever grasp_found is True -- q is the chosen candidate
+    pose's jointspace vector regardless of status, for this function's own
+    internal callers (e.g. rendering the "best available" pose even when no
+    location fully succeeds), but callers persisting results to disk should
+    gate on status == "success" instead (see main()'s search_summary saving,
+    per the "only store q for common-basis poses" requirement this was
+    built for).
+
+    status is one of:
+      "no_grasp"          -- no candidate pose reached/opposed the sphere at
+                             all (grasp_2_finger found nothing).
+      "no_force_closure"  -- candidate poses existed, but none passed force
+                             closure (the "grasping criteria").
+      "no_common_basis"   -- force closure passed for at least one pose, but
+                             none of those also had a common force-ellipsoid
+                             basis.
+      "success"           -- both force closure and a common basis were
+                             found for at least one pose.
+    These are deliberately distinct failure modes: "no_force_closure" means
+    the contacts themselves can't resist arbitrary disturbance wrenches
+    (a geometric/frictional fact about the two contact points), while
+    "no_common_basis" means force closure is fine but the two fingers can't
+    be independently actuated along a shared set of directions (a
+    manipulability property, checked only once closure already passed).
     """
     grasp = grasp_2_finger(
         finger1, body1_idx, wt1,
@@ -509,13 +627,16 @@ def _evaluate_sphere_center(
     if not grasp.grasp_found:
         return {
             "sphere_center": sphere_center, "grasp_found": False,
-            "found_common_basis": False, "rank": 0, "fraction_sum": 0.0, "min_fraction": 0.0,
+            "force_closure_found": False, "found_common_basis": False,
+            "status": "no_grasp",
+            "rank": 0, "fraction_sum": 0.0, "min_fraction": 0.0,
             "q": None, "T1": None, "T2": None, "fe1": None, "fe2": None,
         }
 
     n_poses = grasp.selected_jointspace.shape[0]
     best_score: Optional[tuple[int, float]] = None
     best = None   # (j, fe1, fe2, basis)
+    any_closure_pass = False
     for j in range(n_poses):
         q = grasp.selected_jointspace[j]
         compute_fk(model, data, q)
@@ -539,6 +660,7 @@ def _evaluate_sphere_center(
 
         if closure != "Pass":
             continue
+        any_closure_pass = True
         basis = force_ellipsoid_common_basis([fe1, fe2], angle_tolerance_deg=ANGLE_TOLERANCE_DEG)
         if basis is None:
             continue
@@ -548,14 +670,22 @@ def _evaluate_sphere_center(
             best = (j, fe1, fe2, basis)
 
     chosen_j, fe1, fe2, basis = best
-    if best_score is not None:
+    found_common_basis = best_score is not None
+    if found_common_basis:
+        status = "success"
         print(f"    Chosen pose {chosen_j}/{n_poses}: common-basis rank={best_score[0]}, "
               f"fraction_sum={best_score[1]:.4f}")
+    elif any_closure_pass:
+        status = "no_common_basis"
+        print(f"    {n_poses} candidate pose(s) checked: force closure passed for at least one, "
+              f"but none had a common force-ellipsoid basis -- falling back to candidate pose "
+              f"{chosen_j}/{n_poses} for internal use. Its force ellipsoids are still each "
+              f"contact's own true Jacobian-derived ellipsoid, just not validated against a "
+              f"common basis.")
     else:
-        print(f"    No candidate pose achieved force closure + a common force-ellipsoid basis -- "
-              f"falling back to candidate pose {chosen_j}/{n_poses}. Its force ellipsoids are "
-              f"still each contact's own true Jacobian-derived ellipsoid, just not validated "
-              f"against force closure/a common basis.")
+        status = "no_force_closure"
+        print(f"    {n_poses} candidate pose(s) checked: none passed force closure -- falling "
+              f"back to candidate pose {chosen_j}/{n_poses} for internal use.")
 
     # Lowest per-axis balance score across the common basis (1.0 = the
     # weaker contact matches the stronger one exactly on every axis; lower
@@ -565,7 +695,9 @@ def _evaluate_sphere_center(
     return {
         "sphere_center": sphere_center,
         "grasp_found": True,
-        "found_common_basis": best_score is not None,
+        "force_closure_found": any_closure_pass,
+        "found_common_basis": found_common_basis,
+        "status": status,
         "rank": best_score[0] if best_score is not None else 0,
         "fraction_sum": best_score[1] if best_score is not None else 0.0,
         "min_fraction": min_fraction,
@@ -628,7 +760,8 @@ def _plot_search_summary(
     urdf_base: str,
 ) -> None:
     """
-    Scatter of every searched sphere location, colored by rank, alongside
+    Scatter of every searched sphere location, colored by status (see
+    _evaluate_sphere_center()'s docstring for the four categories), alongside
     the hand at its home/neutral pose for spatial context.
 
     The hand render is a one-time cost (same order as a single detailed
@@ -639,7 +772,7 @@ def _plot_search_summary(
     poses; there's no single "the" pose to show here.
     """
     points = np.array([r["sphere_center"] for r in results])
-    rank = np.array([r["rank"] for r in results])
+    status = [r["status"] for r in results]
 
     q_neutral = pin.neutral(model)
     compute_fk(model, data, q_neutral)
@@ -650,9 +783,12 @@ def _plot_search_summary(
 
     _render_hand_meshes(ax, hand_meshes)
 
-    sc = ax.scatter(points[:, 0], points[:, 1], points[:, 2],
-                    c=rank, cmap="viridis", vmin=0, vmax=3, s=40, zorder=5)
-    fig.colorbar(sc, ax=ax, label="common-basis rank (0 = none found)")
+    for label, color in STATUS_COLORS.items():
+        mask = np.array([s == label for s in status])
+        if not np.any(mask):
+            continue
+        ax.scatter(points[mask, 0], points[mask, 1], points[mask, 2],
+                  c=color, s=40, zorder=5, label=f"{label} ({int(mask.sum())})")
 
     ax.set_xlabel("m"); ax.set_ylabel("m"); ax.set_zlabel("m")
     ax.set_title(f"Sphere-location search summary — {group_stem.replace('_', '+')} "

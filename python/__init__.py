@@ -25,6 +25,9 @@ force_ellipsoid  force_ellipsoid(), force_ellipsoid_vector_correction(),
 grasp_selection  finger_pose_selection(), select_diverse_grasps(), grasp_2_finger()
 manipulation_capacity  manipulation_capacity_region(),
                  sample_weighted_without_replacement()
+dynamics         compute_mass_matrix(), compute_coriolis_matrix(),
+                 mass_and_coriolis_from_urdf() -- not used anywhere yet, see
+                 its module docstring.
 """
 
 from .urdf_parser import (
@@ -109,6 +112,11 @@ from .manipulation_capacity import (
     manipulation_capacity_region,
     sample_weighted_without_replacement,
 )
+from .dynamics import (
+    compute_mass_matrix,
+    compute_coriolis_matrix,
+    mass_and_coriolis_from_urdf,
+)
 
 __all__ = [
     # urdf_parser
@@ -151,4 +159,6 @@ __all__ = [
     # manipulation_capacity
     "ManipulationCapacityResult", "manipulation_capacity_region",
     "sample_weighted_without_replacement",
+    # dynamics
+    "compute_mass_matrix", "compute_coriolis_matrix", "mass_and_coriolis_from_urdf",
 ]
